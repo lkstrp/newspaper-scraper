@@ -62,11 +62,11 @@ def setup_custom_logger(name, same_line_debug=False):
     TODO
     """
     fmt_stream = logging.Formatter(
+        fmt="[%(time_relative)5s] %(levelname)s:%(lineno)d:%(funcName)s - %(message)s",
+        datefmt="%y%m%d %H:%M:%S")
+    fmt_file = logging.Formatter(
         fmt="[%(asctime)s %(time_relative)5s] %(levelname)s:%(lineno)d:%(funcName)s - %(message)s",
         datefmt="%y%m%d %H:%M:%S")
-    fmt_file = \
-        logging.Formatter(fmt="[%(time_relative)4s] %(levelname)s:%(lineno)d:%(funcName)s - %(message)s",
-                          datefmt="%y%m%d %H:%M:%S")
 
     log = logging.getLogger(name)
     log.setLevel(logging.DEBUG)
