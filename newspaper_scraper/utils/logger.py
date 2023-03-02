@@ -57,7 +57,7 @@ def _logger_emit_handler(self, record):
                       + self.terminator)
 
 
-def setup_custom_logger(name, same_line_debug=False):
+def setup_custom_logger(name, same_line_debug=False, log_file_path=None):
     """
     TODO
     """
@@ -86,15 +86,11 @@ def setup_custom_logger(name, same_line_debug=False):
 
         h_stream.setLevel(logging.INFO)
 
-    # h_info = logging.FileHandler(f'logs/{name}_info.log')
-    # h_info.setLevel(logging.INFO)
-    # h_info.setFormatter(fmt_file)
-    # log.addHandler(h_info)
-    #
-    # h_warning = logging.FileHandler(f'logs/{name}_errors.log')
-    # h_warning.setLevel(logging.WARNING)
-    # h_warning.setFormatter(fmt_file)
-    # log.addHandler(h_warning)
+    if log_file_path:
+        h_file = logging.FileHandler(log_file_path)
+        h_file.setLevel(logging.DEBUG)
+        h_file.setFormatter(fmt_file)
+        log.addHandler(h_file)
 
     # todo Handle automatically cleaning of log files (just keep last x lines or something)
     [handler.addFilter(_LoggerTimeTaker()) for handler in log.handlers]
