@@ -14,10 +14,16 @@ from bs4 import BeautifulSoup
 from goose3 import Goose
 from tqdm import tqdm
 
-import logger
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import ElementNotInteractableException
+
+from logger import setup_custom_logger
+from utils import get_selenium_webdriver
 
 # Declare logger
-log = logger.setup_custom_logger(os.path.basename(__file__)[:-3])
+log = setup_custom_logger(os.path.basename(__file__)[:-3])
 
 
 def delay_interrupt(func):
@@ -25,12 +31,12 @@ def delay_interrupt(func):
     TODO DOCSTRING
     """
 
-    def wrapper(*args, **kwargs):
+    def _wrapper(*args, **kwargs):
         s = signal.signal(signal.SIGINT, signal.SIG_IGN)
         func(*args, **kwargs)
         signal.signal(signal.SIGINT, s)
 
-    return wrapper
+    return _wrapper
 
 
 class Database:
@@ -143,8 +149,12 @@ class Scraper:
     """
     _db = Database()
 
-    def __init__(self):
+    def __init__(self, username, password):
+        self.usr = username
+        self.psw = password
+
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
+        self.selenium_driver = None
 
     def index_published_articles(self, date_from, date_to, skip_existing=True):
         """
@@ -241,6 +251,42 @@ class Scraper:
 
             self._db.save_articles()
 
+    def scrape_private_articles_raw_html(self, parse_html=False):
+        """
+        TODO DOCSTRING
+        """
+        if self.usr is None or self.psw is None:
+            raise ValueError('No username or password provided.')
+
+        to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
+                                      (self._db.articles.Public == 0) &
+                                      (self._db.articles.DateScrapedHTML.isnull())]
+
+        if to_scrape.empty:
+            log.info(f'No articles to scrape.')
+            return
+
+        self.selenium_login()
+
+        log.info(f'Start scraping {len(to_scrape)} articles.')
+        counter = 0
+        plog = tqdm(total=0, position=0, bar_format='{desc}')
+        pbar = tqdm(total=len(to_scrape), position=1)
+        for url, row in to_scrape.iterrows():
+            counter += 1
+            pbar.update(1)
+            raw_html = self.get_private_article_raw_html(url)
+
+            plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
+            if not parse_html:
+                self._db.raw_html_add_blop(url, raw_html)
+            else:
+                results = self._parse_article(raw_html, url)
+                self._db.articles.update(results)
+                self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
+
+            self._db.save_articles()
+
     def parse_raw_html(self):
         """
         TODO DOCSTRING
@@ -268,12 +314,6 @@ class Scraper:
             index=[url])
         parsed_infos.index.name = 'URL'
 
-        # parsed_infos = article.infos
-        # assert parsed_infos, f'Article infos are empty.'
-        # parsed_infos = pd.json_normalize(article.infos, sep='_')
-        # parsed_infos.index = [url]
-        # parsed_infos.index.name = 'URL'
-
         return parsed_infos
 
     def get_published_articles(self, day):
@@ -288,14 +328,26 @@ class Scraper:
         """
         raise NotImplemented
 
+    def selenium_login(self):
+        """
+        TODO DOCSTRING
+        """
+        raise NotImplemented
+
+    def get_private_article_raw_html(self, url):
+        """
+        TODO DOCSTRING
+        """
+        raise NotImplemented
+
 
 class DeSpiegel(Scraper):
     """
     TODO DOCSTRING
     """
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, username, password):
+        super().__init__(username, password)
         # Set locale to German
         locale.setlocale(locale.LC_TIME, "de_DE")
 
@@ -336,8 +388,47 @@ class DeSpiegel(Scraper):
             return None, False
         return html, not bool(premium_icon)
 
+    def selenium_login(self):
+        """
+        TODO DOCSTRING
+        """
+        if self.selenium_driver is None:
+            self.selenium_driver = get_selenium_webdriver()
+
+        self.selenium_driver.get('https://gruppenkonto.spiegel.de/anmelden.html')
+        self.selenium_driver.find_element(by=By.NAME, value='loginform:username').send_keys(self.usr)
+        self.selenium_driver.find_element(by=By.NAME, value='loginform:submit').click()
+        self.selenium_driver.find_element(by=By.NAME, value='loginform:password').send_keys(self.psw)
+        self.selenium_driver.find_element(by=By.NAME, value='loginform:submit').click()
+        self.selenium_driver.find_element(by=By.CSS_SELECTOR, value='a[class="tostart"]').click()
+
+        # Accept cookies
+        privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]'))
+        )
+        self.selenium_driver.switch_to.frame(privacy_frame)
+        self.selenium_driver.find_element(By.XPATH, "//button[contains(text(), 'Akzeptieren und weiter')]").click()
+
+        try:
+            self.selenium_driver.find_element(by=By.XPATH, value='//a[@data-sara-link="gruppenkonto"]').click()
+        except ElementNotInteractableException:
+            pass
+
+        log.info('Started Selenium Driver and logged in to Spiegel Plus.')
+
+    def get_private_article_raw_html(self, url):
+        """
+        TODO DOCSTRING
+        """
+        self.selenium_driver.get(url)
+
+        return self.selenium_driver.page_source
+
 
 if __name__ == "__main__":
-    spiegel = DeSpiegel()
-    spiegel.index_published_articles('2020-1-1', '2020-12-31', skip_existing=True)
-    spiegel.scrape_public_articles_raw_html(parse_html=True)
+    from credentials import SPIEGEL_USERNAME, SPIEGEL_PASSWORD
+
+    spiegel = DeSpiegel(username=SPIEGEL_USERNAME, password=SPIEGEL_PASSWORD)
+    # spiegel.index_published_articles('2020-1-1', '2020-12-31', skip_existing=True)
+    # spiegel.scrape_public_articles_raw_html(parse_html=True)
+    spiegel.scrape_private_articles_raw_html(parse_html=True)
