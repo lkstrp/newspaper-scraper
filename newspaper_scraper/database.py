@@ -1,3 +1,6 @@
+"""
+TODO DOCSTRING
+"""
 import signal
 import datetime as dt
 import os
@@ -9,6 +12,7 @@ from .utils.logger import setup_custom_logger
 
 # Declare logger
 log = setup_custom_logger(os.path.basename(__file__)[:-3])
+
 
 def delay_interrupt(func):
     """
@@ -70,15 +74,26 @@ class Database:
 
                           'Title TEXT, '
                           'Authors TEXT, '
-                          'PublishDate DATE, '
-                          'Description TEXT, '
+                          'PublishDate TEXT, '
+                          'MetaDescription TEXT, '
+                          'Domain TEXT, '
+                          'OpengraphTitle TEXT, '
+                          'OpengraphType TEXT, '
+                          'OpengraphUrl TEXT, '
+                          'OpengraphImage TEXT, '
+                          'OpengraphDescription TEXT, '
                           'CleanedText TEXT, '
-                          'DateParsedHTML DATE)')
+                          'MetaLang TEXT, '
+                          'MetaKeywords TEXT, '
+                          'MetaFavicon TEXT, '
+                          'MetaCanonical TEXT, '
+                          'MetaEncoding TEXT, '
+                          'Image TEXT, '
+                          'Tags TEXT, '
+                          'Tweets TEXT, '
+                          'Movies TEXT, '
+                          'Links TEXT)')
 
-        self._cur.execute('CREATE TABLE tblRawHTML ('
-                          'URL TEXT PRIMARY KEY, '
-                          'RawHTML BLOP)')
-        self._conn.commit()
         self._load_tables()
 
     @delay_interrupt
@@ -86,32 +101,6 @@ class Database:
         self.save_articles()
         self._conn.close()
         self._cur.close()
-
-    @delay_interrupt
-    def raw_html_add_index(self, urls):
-        """
-        TODO DOCSTRING
-        """
-        for url in urls:
-            self._cur.execute(
-                'INSERT INTO tblRawHTML (URL, RawHTML) VALUES (?, NULL) ON CONFLICT(URL) DO UPDATE SET RawHTML=NULL',
-                (url,))
-        self._conn.commit()
-
-    @delay_interrupt
-    def raw_html_add_blop(self, url, raw_html):
-        """
-        TODO DOCSTRING
-        """
-        self._cur.execute('UPDATE tblRawHTML SET RawHTML=? WHERE URL=?', (raw_html, url))
-        self._conn.commit()
-
-    @delay_interrupt
-    def raw_html_get_blop(self, url):
-        """
-        TODO DOCSTRING
-        """
-        return self._cur.execute('SELECT RawHTML FROM tblRawHTML WHERE URL=?', (url,)).fetchall()
 
     @delay_interrupt
     def save_articles(self):

@@ -2,3 +2,5 @@ jupyter
 pandas
 selenium
 beautifulsoup4
+goose3
+tqdm

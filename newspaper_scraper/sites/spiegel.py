@@ -33,7 +33,7 @@ class DeSpiegel(Scraper):
         # Set locale to German
         locale.setlocale(locale.LC_TIME, "de_DE")
 
-    def get_published_articles(self, day):
+    def _get_published_articles(self, day):
         """
         TODO DOCSTRING
         """
@@ -57,7 +57,7 @@ class DeSpiegel(Scraper):
 
         return urls, pub_dates
 
-    def get_raw_html(self, url):
+    def _soup_get_html(self, url):
         """
         TODO DOCSTRING
         """
@@ -70,7 +70,7 @@ class DeSpiegel(Scraper):
             return None, False
         return html, not bool(premium_icon)
 
-    def selenium_login(self):
+    def _selenium_login(self):
         """
         TODO DOCSTRING
         """
@@ -98,7 +98,7 @@ class DeSpiegel(Scraper):
 
         log.info('Started Selenium Driver and logged in to Spiegel Plus.')
 
-    def get_private_article_raw_html(self, url):
+    def _selenium_get_html(self, url):
         """
         TODO DOCSTRING
         """

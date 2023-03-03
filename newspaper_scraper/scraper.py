@@ -7,12 +7,13 @@ import datetime as dt
 
 import time
 
-
 import pandas as pd
 from goose3 import Goose
 from tqdm import tqdm
+from selenium.common.exceptions import TimeoutException
 
 from .utils.logger import setup_custom_logger
+from .utils.utils import flatten_dict
 from .database import Database
 
 # Declare logger
@@ -31,6 +32,35 @@ class Scraper:
 
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
         self.selenium_driver = None
+
+    def _parse_article(self, html, url):
+        """
+        TODO DOCSTRING
+        """
+        g = Goose()
+        article = g.extract(raw_html=html)
+
+        # Get all parsed infos
+        parsed_infos = article.infos
+        parsed_infos = flatten_dict(parsed_infos)
+        # Change all keys to CamelCase
+        parsed_infos = {''.join(word.title() for word in k.split('_')): v for k, v in parsed_infos.items()}
+
+        # check if all keys of parsed_infos are also in self.db.articles.columns
+        # if not raise warning
+        if not all([col in self._db.articles.columns for col in parsed_infos.keys()]):
+            raise ValueError(f'Not all keys of parsed_infos are also in self.db.articles.columns. '
+                             f'Keys: {parsed_infos.keys()}')
+
+        # make all values of parsed_infos which are a list to a pd.Series
+        for key, value in parsed_infos.items():
+            if isinstance(value, list):
+                parsed_infos[key] = pd.Series(value, dtype='object')
+
+        parsed_infos = pd.DataFrame(parsed_infos, index=[url])
+        parsed_infos.index.name = 'URL'
+
+        return parsed_infos
 
     def index_published_articles(self, date_from, date_to, skip_existing=True):
         """
@@ -58,7 +88,7 @@ class Scraper:
                 counter += 1
                 pbar.update(1)
 
-                urls, pub_dates = self.get_published_articles(day)
+                urls, pub_dates = self._get_published_articles(day)
 
                 # Remove query strings from urls
                 urls = [url.split('?')[0] for url in urls]
@@ -73,8 +103,6 @@ class Scraper:
                 # Mark if urls are new
                 urls['new'] = ~urls.index.isin(self._db.articles.index)
 
-                # Add new urls to RawHTML table as index
-                self._db.raw_html_add_index(urls[urls['new']].index)
                 # Add new urls to articles table
                 self._db.articles = pd.concat([self._db.articles, urls[urls['new']].drop('new', axis=1)])
 
@@ -83,7 +111,7 @@ class Scraper:
 
                 self._db.save_articles()
 
-    def scrape_public_articles_raw_html(self, parse_html=False):
+    def scrape_public_articles(self):
         """
         TODO DOCSTRING
         """
@@ -103,20 +131,18 @@ class Scraper:
         for url, row in to_scrape.iterrows():
             counter += 1
             pbar.update(1)
-            raw_html, public = self.get_raw_html(url)
+            raw_html, public = self._soup_get_html(url)
 
             if public:
                 plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped. '
                                          f'(Stats: {stats.count(1)}/{stats.count(0)} '
                                          f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
-                if not parse_html:
-                    self._db.raw_html_add_blop(url, raw_html)
-                else:
-                    results = self._parse_article(raw_html, url)
-                    self._db.articles.update(results)
-                    self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
 
+                results = self._parse_article(raw_html, url)
+                self._db.articles.update(results)
+                self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
                 stats.append(1)
+
             else:
                 plog.set_description_str(f'{counter}/{len(to_scrape)}: Article is not public. '
                                          f'(Stats: {stats.count(1)}/{stats.count(0)} '
@@ -127,7 +153,7 @@ class Scraper:
 
             self._db.save_articles()
 
-    def scrape_private_articles_raw_html(self, parse_html=False, catch_exceptions=True):
+    def scrape_private_articles(self, catch_exceptions=True):
         """
         TODO DOCSTRING
         """
@@ -144,7 +170,7 @@ class Scraper:
                 log.info(f'No articles to scrape.')
                 return
 
-            self.selenium_login()
+            self._selenium_login()
 
             log.info(f'Start scraping {len(to_scrape)} articles.')
             counter = 0
@@ -153,15 +179,12 @@ class Scraper:
             for url, row in to_scrape.iterrows():
                 counter += 1
                 pbar.update(1)
-                raw_html = self.get_private_article_raw_html(url)
+                raw_html = self._selenium_get_html(url)
 
                 plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
-                if not parse_html:
-                    self._db.raw_html_add_blop(url, raw_html)
-                else:
-                    results = self._parse_article(raw_html, url)
-                    self._db.articles.update(results)
-                    self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
+                results = self._parse_article(raw_html, url)
+                self._db.articles.update(results)
+                self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
 
                 self._db.save_articles()
 
@@ -169,7 +192,7 @@ class Scraper:
             try:
                 _func()
                 break
-            except Exception as e:
+            except TimeoutException as e:
                 if catch_exceptions:
                     log.exception(f'Exception while scraping private articles: {e}.')
                     log.info('Retrying in 100 seconds...')
@@ -177,59 +200,25 @@ class Scraper:
                 else:
                     raise e
 
-    def parse_raw_html(self):
-        """
-        TODO DOCSTRING
-        """
-        # TODO Needs to be implemented
-        to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
-                                      (self._db.articles.Public.isnull())]
-        pass
-
-    @staticmethod
-    def _parse_article(html, url):
-        """
-        TODO DOCSTRING
-        """
-        g = Goose()
-        article = g.extract(raw_html=html)
-
-        try:
-            parsed_infos = pd.DataFrame(
-                {'Title': article.title,
-                 'Authors': article.authors,
-                 'PublishDate': article.publish_date,
-                 'Description': article.meta_description,
-                 'CleanedText': article.cleaned_text,
-                 'DateParsedHTML': dt.datetime.now()},
-                index=[url])
-            parsed_infos.index.name = 'URL'
-        except Exception as e:
-            log.error(f'Error while parsing article {url}: {e}')
-            parsed_infos = pd.DataFrame(index=[url])
-            parsed_infos.index.name = 'URL'
-
-        return parsed_infos
-
-    def get_published_articles(self, day):
+    def _get_published_articles(self, day):
         """
         TODO DOCSTRING
         """
         raise NotImplemented
 
-    def get_raw_html(self, url):
+    def _soup_get_html(self, url):
         """
         TODO DOCSTRING
         """
         raise NotImplemented
 
-    def selenium_login(self):
+    def _selenium_login(self):
         """
         TODO DOCSTRING
         """
         raise NotImplemented
 
-    def get_private_article_raw_html(self, url):
+    def _selenium_get_html(self, url):
         """
         TODO DOCSTRING
         """

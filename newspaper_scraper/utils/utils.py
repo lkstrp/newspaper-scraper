@@ -1,3 +1,6 @@
+"""
+TODO DOCSTRING
+"""
 import sys
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -26,3 +29,16 @@ def get_selenium_webdriver():
         raise Exception("Operating system couldn't be detected.")
 
     return driver
+
+def flatten_dict(d, parent_key='', sep='_'):
+    """
+    Recursively flattens a nested dictionary.
+    """
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
