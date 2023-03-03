@@ -12,12 +12,12 @@ from goose3 import Goose
 from tqdm import tqdm
 from selenium.common.exceptions import TimeoutException
 
-from .utils.logger import setup_custom_logger
+from .utils.logger import CustomLogger
 from .utils.utils import flatten_dict
 from .database import Database
 
 # Declare logger
-log = setup_custom_logger(os.path.basename(__file__)[:-3])
+log = CustomLogger(os.path.basename(__file__)[:-3])
 
 
 class Scraper:

@@ -8,10 +8,10 @@ import os
 import pandas as pd
 import sqlite3
 
-from .utils.logger import setup_custom_logger
+from .utils.logger import CustomLogger
 
 # Declare logger
-log = setup_custom_logger(os.path.basename(__file__)[:-3])
+log = CustomLogger(os.path.basename(__file__)[:-3])
 
 
 def delay_interrupt(func):
