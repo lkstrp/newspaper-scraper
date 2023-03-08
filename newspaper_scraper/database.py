@@ -11,7 +11,7 @@ import sqlite3
 from .utils.logger import CustomLogger
 
 # Declare logger
-log = CustomLogger(os.path.basename(__file__)[:-3])
+log = CustomLogger(os.path.basename(__file__)[:-3], log_file='logs.log')
 
 
 def delay_interrupt(func):
@@ -37,16 +37,14 @@ class Database:
         self.db_file = db_file
         self._conn = sqlite3.connect(db_file)
         self._cur = self._conn.cursor()
-        self._save_interval = 0
+        self._save_interval = 60
         self._last_save = dt.datetime.now() - dt.timedelta(seconds=self._save_interval)
 
         self.articles = None
         self._load_tables()
 
-        log.info(f'Loaded {len(self.articles)} articles from database.')
-
-    @delay_interrupt
     def _load_tables(self):
+        log.info(f'Loading database from {self.db_file}.')
         try:
             self.articles = pd.read_sql_query(f"SELECT * FROM tblArticles",
                                               self._conn,
@@ -56,11 +54,12 @@ class Database:
             self.articles.Public = self.articles.Public.apply(lambda x: True if x == '1' or x == 1 else x)
             self.articles.Public = self.articles.Public.apply(lambda x: False if x == '0' or x == 0 else x)
 
+            log.info(f'Found {len(self.articles)} articles in database.')
+
         except pd.errors.DatabaseError:
-            log.info(f'Database not found. Creating new database in {self.db_file}.')
+            log.info(f'No Database found. Creating new database.')
             self._create_tables()
 
-    @delay_interrupt
     def _create_tables(self):
         self._cur.execute('CREATE TABLE tblArticles ('
                           'URL TEXT PRIMARY KEY, '
@@ -82,6 +81,7 @@ class Database:
                           'OpengraphUrl TEXT, '
                           'OpengraphImage TEXT, '
                           'OpengraphDescription TEXT, '
+                          'OpengraphSiteName TEXT, '
                           'CleanedText TEXT, '
                           'MetaLang TEXT, '
                           'MetaKeywords TEXT, '
@@ -109,8 +109,15 @@ class Database:
         """
         if self._last_save + dt.timedelta(seconds=self._save_interval) > dt.datetime.now():
             return
+
+        df = self.articles.copy()
+
         # Convert lists to strings
-        for column in self.articles.columns:
-            if any([isinstance(x, list) for x in self.articles[column].values]):
-                self.articles[column] = self.articles[column].apply(lambda x: str(x))
-        self.articles.to_sql('tblArticles', self._conn, index_label='URL', if_exists='replace')
+        for column in df.columns:
+            if any([isinstance(x, list) for x in df[column].values]):
+                df[column] = df[column].apply(lambda x: str(x))
+
+        # Convert dates to strings
+        df.PubDateIndexPage = df.PubDateIndexPage.apply(str)
+
+        df.to_sql('tblArticles', self._conn, index_label='URL', if_exists='replace')

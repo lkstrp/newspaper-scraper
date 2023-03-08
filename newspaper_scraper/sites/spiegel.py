@@ -3,23 +3,23 @@ TODO DOCSTRING
 """
 import os
 import re
-import datetime as dt
 import locale
 
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import ElementNotInteractableException
+from selenium.common.exceptions import TimeoutException
 
 from ..utils.logger import CustomLogger
 from ..utils.utils import get_selenium_webdriver
 from ..scraper import Scraper
 
-
 # Declare logger
-log = CustomLogger(os.path.basename(__file__)[:-3])
+log = CustomLogger(os.path.basename(__file__)[:-3], log_file='logs.log')
 
 
 class DeSpiegel(Scraper):
@@ -27,7 +27,7 @@ class DeSpiegel(Scraper):
     TODO DOCSTRING
     """
 
-    def __init__(self, username, password):
+    def __init__(self, username=None, password=None):
         super().__init__(username, password)
 
         # Set locale to German
@@ -50,8 +50,10 @@ class DeSpiegel(Scraper):
 
         # Get articles publication dates
         time_regex = re.compile(r'\d{1,2}\.\s\w+,\s\d{1,2}\.\d{2}\sUhr')
-        pub_dates = [dt.datetime.strptime(f'{article.find(string=time_regex)}; {day.year}', '%d. %B, %H.%M Uhr; %Y')
+        pub_dates = [pd.to_datetime(f'{article.find(string=time_regex)}; {day.year}', format='%d. %B, %H.%M Uhr; %Y')
                      for article in articles]
+        # Add timezone Europe/Berlin to pub_dates
+        pub_dates = [pub_date.tz_localize('Europe/Berlin') for pub_date in pub_dates]
 
         assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
 
@@ -74,34 +76,40 @@ class DeSpiegel(Scraper):
         """
         TODO DOCSTRING
         """
+        if self.usr is None or self.psw is None:
+            raise ValueError('Username and password must be provided to login.')
         if self.selenium_driver is None:
             self.selenium_driver = get_selenium_webdriver()
+            log.info('Selenium webdriver initialized.')
 
-        self.selenium_driver.get('https://gruppenkonto.spiegel.de/anmelden.html')
-        self.selenium_driver.find_element(by=By.NAME, value='loginform:username').send_keys(self.usr)
-        self.selenium_driver.find_element(by=By.NAME, value='loginform:submit').click()
-        self.selenium_driver.find_element(by=By.NAME, value='loginform:password').send_keys(self.psw)
-        self.selenium_driver.find_element(by=By.NAME, value='loginform:submit').click()
-        self.selenium_driver.find_element(by=By.CSS_SELECTOR, value='a[class="tostart"]').click()
-
-        # Accept cookies
-        privacy_frame = WebDriverWait(self.selenium_driver, 20).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]'))
-        )
+        # Go to main page and accept cookies
+        self.selenium_driver.get('https://www.spiegel.de/')
+        privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
         self.selenium_driver.switch_to.frame(privacy_frame)
         self.selenium_driver.find_element(By.XPATH, "//button[contains(text(), 'Akzeptieren und weiter')]").click()
 
+        # Login
+        self.selenium_driver.get('https://gruppenkonto.spiegel.de/anmelden.html')
+        self.selenium_driver.find_element(By.NAME, 'loginform:username').send_keys(self.usr)
+        self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
+        self.selenium_driver.find_element(By.NAME, 'loginform:password').send_keys(self.psw)
+        self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
+
+        # Click on Anmelden button because sometimes the login is not saved on main page
+        self.selenium_driver.get('https://www.spiegel.de/')
         try:
-            self.selenium_driver.find_element(by=By.XPATH, value='//a[@data-sara-link="gruppenkonto"]').click()
+            self.selenium_driver.find_element(By.XPATH, '//a[@data-sara-link="gruppenkonto"]').click()
         except ElementNotInteractableException:
             pass
 
-        log.info('Started Selenium Driver and logged in to Spiegel Plus.')
-
-    def _selenium_get_html(self, url):
-        """
-        TODO DOCSTRING
-        """
-        self.selenium_driver.get(url)
-
-        return self.selenium_driver.page_source
+        # Check if loggin was successful
+        self.selenium_driver.get('https://www.spiegel.de/')
+        try:
+            WebDriverWait(self.selenium_driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, '//a[@href="https://www.spiegel.de/fuermich/"]')))
+            log.info('Logged in to Spiegel Plus.')
+            return True
+        except TimeoutException:
+            log.error('Login to Spiegel Plus failed.')
+            return False

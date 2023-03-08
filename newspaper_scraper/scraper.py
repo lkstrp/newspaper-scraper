@@ -1,10 +1,10 @@
 """
 TODO DOCSTRING
 """
+import sys
 import os
 import re
 import datetime as dt
-
 import time
 
 import pandas as pd
@@ -17,7 +17,7 @@ from .utils.utils import flatten_dict
 from .database import Database
 
 # Declare logger
-log = CustomLogger(os.path.basename(__file__)[:-3])
+log = CustomLogger(os.path.basename(__file__)[:-3], log_file='logs.log')
 
 
 class Scraper:
@@ -46,13 +46,12 @@ class Scraper:
         # Change all keys to CamelCase
         parsed_infos = {''.join(word.title() for word in k.split('_')): v for k, v in parsed_infos.items()}
 
-        # check if all keys of parsed_infos are also in self.db.articles.columns
-        # if not raise warning
+        # Check if all detected data can be stored in the database
         if not all([col in self._db.articles.columns for col in parsed_infos.keys()]):
-            raise ValueError(f'Not all keys of parsed_infos are also in self.db.articles.columns. '
-                             f'Keys: {parsed_infos.keys()}')
+            raise ValueError(f'Not all keys of parsed_infos are also in self.db.articles.columns: '
+                             f'{[col for col in parsed_infos.keys() if col not in self._db.articles.columns]}')
 
-        # make all values of parsed_infos which are a list to a pd.Series
+        # Change lists to pd.Series to be able to store them in the database
         for key, value in parsed_infos.items():
             if isinstance(value, list):
                 parsed_infos[key] = pd.Series(value, dtype='object')
@@ -72,15 +71,17 @@ class Scraper:
             date_to = pd.to_datetime(date_to)
 
             date_range = [day for day in pd.date_range(date_from, date_to) if
-                          not any([day.date() == index_day.date() for index_day in self._db.articles.PubDateIndexPage])
+                          not any([day.date() == index_day.date() for index_day in self._db.articles[
+                              self._db.articles.NewspaperID == self.newspaper_id].PubDateIndexPage])
                           or not skip_existing]
 
             if len(date_range) == 0:
                 log.info(f'No new days to scrape. Pass skip_existing=False to scrape all days again.')
                 return
 
-            log.info(f'Start scraping articles for {len(date_range)} days. '
-                     f'{len(pd.date_range(date_from, date_to)) - len(date_range)} days already indexed.')
+            log.info(f'Start scraping articles for {len(date_range)} days ({date_from.strftime("%d.%m.%y")} - '
+                     f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range)} '
+                     f'days already indexed.')
             plog = tqdm(total=0, position=0, bar_format='{desc}')
             pbar = tqdm(total=len(date_range), position=1)
             counter = 0
@@ -89,6 +90,11 @@ class Scraper:
                 pbar.update(1)
 
                 urls, pub_dates = self._get_published_articles(day)
+
+                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
+                    f'Not all pub_dates are datetime objects.'
+                assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
+                    f'Not all pub_dates contain timezone info.'
 
                 # Remove query strings from urls
                 urls = [url.split('?')[0] for url in urls]
@@ -170,7 +176,10 @@ class Scraper:
                 log.info(f'No articles to scrape.')
                 return
 
-            self._selenium_login()
+            login_successful = self._selenium_login()
+            if not login_successful:
+                log.warning(f'Login failed. Skipping scraping.')
+                return
 
             log.info(f'Start scraping {len(to_scrape)} articles.')
             counter = 0
@@ -179,10 +188,13 @@ class Scraper:
             for url, row in to_scrape.iterrows():
                 counter += 1
                 pbar.update(1)
-                raw_html = self._selenium_get_html(url)
 
-                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
+                # Scrape article
+                self.selenium_driver.get(url)
+                raw_html = self.selenium_driver.page_source
                 results = self._parse_article(raw_html, url)
+                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
+
                 self._db.articles.update(results)
                 self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
 
@@ -192,6 +204,8 @@ class Scraper:
             try:
                 _func()
                 break
+            except KeyboardInterrupt:
+                sys.exit()
             except TimeoutException as e:
                 if catch_exceptions:
                     log.exception(f'Exception while scraping private articles: {e}.')
@@ -213,12 +227,6 @@ class Scraper:
         raise NotImplemented
 
     def _selenium_login(self):
-        """
-        TODO DOCSTRING
-        """
-        raise NotImplemented
-
-    def _selenium_get_html(self, url):
         """
         TODO DOCSTRING
         """
