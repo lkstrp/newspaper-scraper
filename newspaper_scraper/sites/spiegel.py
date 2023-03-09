@@ -4,18 +4,18 @@ TODO DOCSTRING
 import os
 import re
 import locale
+import datetime as dt
 
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support import expected_conditions as ec
 from selenium.common.exceptions import ElementNotInteractableException
 from selenium.common.exceptions import TimeoutException
 
 from ..utils.logger import CustomLogger
-from ..utils.utils import get_selenium_webdriver
 from ..scraper import Scraper
 
 # Declare logger
@@ -27,13 +27,13 @@ class DeSpiegel(Scraper):
     TODO DOCSTRING
     """
 
-    def __init__(self, username=None, password=None):
-        super().__init__(username, password)
+    def __init__(self, db_file: str = 'articles.db'):
+        super().__init__(db_file)
 
         # Set locale to German
         locale.setlocale(locale.LC_TIME, "de_DE")
 
-    def _get_published_articles(self, day):
+    def _get_published_articles(self, day: dt.date):
         """
         TODO DOCSTRING
         """
@@ -59,7 +59,7 @@ class DeSpiegel(Scraper):
 
         return urls, pub_dates
 
-    def _soup_get_html(self, url):
+    def _soup_get_html(self, url: str):
         """
         TODO DOCSTRING
         """
@@ -72,28 +72,22 @@ class DeSpiegel(Scraper):
             return None, False
         return html, not bool(premium_icon)
 
-    def _selenium_login(self):
+    def _selenium_login(self, username: str, password: str):
         """
         TODO DOCSTRING
         """
-        if self.usr is None or self.psw is None:
-            raise ValueError('Username and password must be provided to login.')
-        if self.selenium_driver is None:
-            self.selenium_driver = get_selenium_webdriver()
-            log.info('Selenium webdriver initialized.')
-
         # Go to main page and accept cookies
         self.selenium_driver.get('https://www.spiegel.de/')
         privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
+            ec.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
         self.selenium_driver.switch_to.frame(privacy_frame)
         self.selenium_driver.find_element(By.XPATH, "//button[contains(text(), 'Akzeptieren und weiter')]").click()
 
         # Login
         self.selenium_driver.get('https://gruppenkonto.spiegel.de/anmelden.html')
-        self.selenium_driver.find_element(By.NAME, 'loginform:username').send_keys(self.usr)
+        self.selenium_driver.find_element(By.NAME, 'loginform:username').send_keys(username)
         self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
-        self.selenium_driver.find_element(By.NAME, 'loginform:password').send_keys(self.psw)
+        self.selenium_driver.find_element(By.NAME, 'loginform:password').send_keys(password)
         self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
 
         # Click on Anmelden button because sometimes the login is not saved on main page
@@ -107,7 +101,7 @@ class DeSpiegel(Scraper):
         self.selenium_driver.get('https://www.spiegel.de/')
         try:
             WebDriverWait(self.selenium_driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//a[@href="https://www.spiegel.de/fuermich/"]')))
+                ec.presence_of_element_located((By.XPATH, '//a[@href="https://www.spiegel.de/fuermich/"]')))
             log.info('Logged in to Spiegel Plus.')
             return True
         except TimeoutException:

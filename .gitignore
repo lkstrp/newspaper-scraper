@@ -3,6 +3,7 @@ dev.ipynb
 dev.py
 
 # Data
+data/
 articles.db
 articles.db-journal
 

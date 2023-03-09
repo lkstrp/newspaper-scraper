@@ -14,6 +14,7 @@ from selenium.common.exceptions import TimeoutException
 
 from .utils.logger import CustomLogger
 from .utils.utils import flatten_dict
+from .utils.utils import get_selenium_webdriver
 from .database import Database
 
 # Declare logger
@@ -24,14 +25,19 @@ class Scraper:
     """
     TODO DOCSTRING
     """
-    _db = Database()
 
-    def __init__(self, username, password):
-        self.usr = username
-        self.psw = password
+    def __init__(self, db_file):
+        self._db = Database(db_file=db_file)
 
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
         self.selenium_driver = None
+
+    def __enter__(self):
+        self._db.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._db.close()
 
     def _parse_article(self, html, url):
         """
@@ -87,7 +93,6 @@ class Scraper:
             counter = 0
             for day in date_range:
                 counter += 1
-                pbar.update(1)
 
                 urls, pub_dates = self._get_published_articles(day)
 
@@ -111,7 +116,7 @@ class Scraper:
 
                 # Add new urls to articles table
                 self._db.articles = pd.concat([self._db.articles, urls[urls['new']].drop('new', axis=1)])
-
+                pbar.update(1)
                 plog.set_description_str(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
                                          f'for {day.strftime("%d.%m.%Y")}.')
 
@@ -132,78 +137,84 @@ class Scraper:
         counter = 0
         plog = tqdm(total=0, position=0, bar_format='{desc}')
         pbar = tqdm(total=len(to_scrape), position=1)
-
         stats = []
         for url, row in to_scrape.iterrows():
             counter += 1
-            pbar.update(1)
             raw_html, public = self._soup_get_html(url)
 
             if public:
-                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped. '
-                                         f'(Stats: {stats.count(1)}/{stats.count(0)} '
-                                         f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
-
                 results = self._parse_article(raw_html, url)
                 self._db.articles.update(results)
                 self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
                 stats.append(1)
 
+                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped. '
+                                         f'(Stats: {stats.count(1)}/{stats.count(0)} '
+                                         f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+
             else:
+                stats.append(0)
                 plog.set_description_str(f'{counter}/{len(to_scrape)}: Article is not public. '
                                          f'(Stats: {stats.count(1)}/{stats.count(0)} '
                                          f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
-                stats.append(0)
+            pbar.update(1)
 
+            # Add results to articles table and save
             self._db.articles.loc[url, 'Public'] = public
-
             self._db.save_articles()
 
-    def scrape_private_articles(self, catch_exceptions=True):
+    def scrape_private_articles(self, username: str, password: str, catch_exceptions=True):
         """
         TODO DOCSTRING
         """
-
-        def _func():
-            if self.usr is None or self.psw is None:
-                raise ValueError('No username or password provided.')
-
-            to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
-                                          (self._db.articles.Public == 0) &
-                                          (self._db.articles.DateScrapedHTML.isnull())]
-
-            if to_scrape.empty:
-                log.info(f'No articles to scrape.')
-                return
-
-            login_successful = self._selenium_login()
-            if not login_successful:
-                log.warning(f'Login failed. Skipping scraping.')
-                return
-
-            log.info(f'Start scraping {len(to_scrape)} articles.')
-            counter = 0
-            plog = tqdm(total=0, position=0, bar_format='{desc}')
-            pbar = tqdm(total=len(to_scrape), position=1)
-            for url, row in to_scrape.iterrows():
-                counter += 1
-                pbar.update(1)
-
-                # Scrape article
-                self.selenium_driver.get(url)
-                raw_html = self.selenium_driver.page_source
-                results = self._parse_article(raw_html, url)
-                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
-
-                self._db.articles.update(results)
-                self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
-
-                self._db.save_articles()
-
         while True:
             try:
-                _func()
+                to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
+                                              (self._db.articles.Public == 0) &
+                                              (self._db.articles.DateScrapedHTML.isnull())]
+
+                # Return if no articles to scrape
+                if to_scrape.empty:
+                    log.info(f'No articles to scrape.')
+                    return
+
+                # Initialize selenium webdriver
+                if self.selenium_driver is None:
+                    self.selenium_driver = get_selenium_webdriver()
+                    log.info('Selenium webdriver initialized.')
+
+                # Login
+                login_successful = self._selenium_login(username=username, password=password)
+                if not login_successful:
+                    log.warning(f'Login failed. Skipping scraping.')
+                    return
+
+                # Scrape articles
+                log.info(f'Start scraping {len(to_scrape)} articles.')
+                counter = 0
+                plog = tqdm(total=0, position=0, bar_format='{desc}')
+                pbar = tqdm(total=len(to_scrape), position=1)
+                for url, row in to_scrape.iterrows():
+                    counter += 1
+
+                    # Scrape article
+                    self.selenium_driver.get(url)
+                    raw_html = self.selenium_driver.page_source
+                    results = self._parse_article(raw_html, url)
+
+                    # Add results to articles table and save
+                    self._db.articles.update(results)
+                    self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
+                    self._db.save_articles()
+
+                    # Update progress bar
+                    pbar.update(1)
+                    plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
+
+                self.selenium_driver.quit()
                 break
+
+            # Catch exceptions
             except KeyboardInterrupt:
                 sys.exit()
             except TimeoutException as e:
@@ -226,7 +237,7 @@ class Scraper:
         """
         raise NotImplemented
 
-    def _selenium_login(self):
+    def _selenium_login(self, username: str, password: str):
         """
         TODO DOCSTRING
         """

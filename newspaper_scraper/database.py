@@ -16,7 +16,12 @@ log = CustomLogger(os.path.basename(__file__)[:-3], log_file='logs.log')
 
 def delay_interrupt(func):
     """
-    TODO DOCSTRING
+    This decorator is used to handle keyboard interrupts. It is applied to methods that perform long-running operations
+     which should not be interrupted (like writings to the SQL database). It ignores keyboard interrupts while the
+     function is running and then restores the interrupt handler when it is finished.
+
+    Args:
+        func (function): The function to be wrapped.
     """
 
     def _wrapper(*args, **kwargs):
@@ -33,13 +38,22 @@ class Database:
     """
 
     @delay_interrupt
-    def __init__(self, db_file="./articles.db"):
+    def __init__(self, db_file, save_interval=60):
         self.db_file = db_file
-        self._conn = sqlite3.connect(db_file)
-        self._cur = self._conn.cursor()
-        self._save_interval = 60
+        self.articles = None
+
+        self._save_interval = save_interval
         self._last_save = dt.datetime.now() - dt.timedelta(seconds=self._save_interval)
 
+        self._cur = None
+        self._conn = None
+
+    def connect(self):
+        """
+        TODO DOCSTRING
+        """
+        self._conn = sqlite3.connect(self.db_file)
+        self._cur = self._conn.cursor()
         self.articles = None
         self._load_tables()
 
@@ -97,12 +111,6 @@ class Database:
         self._load_tables()
 
     @delay_interrupt
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.save_articles()
-        self._conn.close()
-        self._cur.close()
-
-    @delay_interrupt
     def save_articles(self):
         """
         TODO DOCSTRING
@@ -121,3 +129,12 @@ class Database:
         df.PubDateIndexPage = df.PubDateIndexPage.apply(str)
 
         df.to_sql('tblArticles', self._conn, index_label='URL', if_exists='replace')
+
+    @delay_interrupt
+    def close(self):
+        """
+        TODO DOCSTRING
+        """
+        self.save_articles()
+        self._cur.close()
+        self._conn.close()
