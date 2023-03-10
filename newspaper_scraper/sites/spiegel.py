@@ -1,7 +1,9 @@
 """
-TODO DOCSTRING
+This module contains the class to scrape articles from the "Spiegel" newspaper (https://www.spiegel.de/).
+The class inherits from the Scraper class and needs an implementation of the abstract methods.
+With a similar implementation, it is possible to scrape articles from other news websites.
 """
-import os
+
 import re
 import locale
 import datetime as dt
@@ -16,15 +18,22 @@ from selenium.common.exceptions import ElementNotInteractableException
 from selenium.common.exceptions import TimeoutException
 
 from ..utils.logger import CustomLogger
+from ..settings import settings
 from ..scraper import Scraper
 
 # Declare logger
-log = CustomLogger(os.path.basename(__file__)[:-3], log_file='logs.log')
+log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 
 class DeSpiegel(Scraper):
     """
-    TODO DOCSTRING
+    This class inherits from the Scraper class and implements the newspaper specific methods. 
+    These methods are:
+        - _get_published_articles: Index articles published on a given day and return the urls and publication dates.
+        - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
+            beautifulsoup.
+        - _selenium_login: Login to the newspaper website to allow scraping of premium content after the login. Uses
+            selenium.
     """
 
     def __init__(self, db_file: str = 'articles.db'):
@@ -35,7 +44,15 @@ class DeSpiegel(Scraper):
 
     def _get_published_articles(self, day: dt.date):
         """
-        TODO DOCSTRING
+        Index articles published on a given day and return the urls and publication dates.
+
+        Args:
+            day (dt.date): Date of the articles to index.
+
+        Returns:
+            urls ([str]): List of urls of the articles published on the given day.
+            pub_dates ([dt.datetime]): List of publication dates of the articles published on the given day.
+              Needs timezone information.
         """
         URL = f'https://www.spiegel.de/nachrichtenarchiv/artikel-{day.strftime("%d.%m.%Y")}.html'
         soup = BeautifulSoup(requests.get(URL).content, "html.parser")
@@ -61,7 +78,14 @@ class DeSpiegel(Scraper):
 
     def _soup_get_html(self, url: str):
         """
-        TODO DOCSTRING
+        For a single article, determine if it is premium content and scrape the html if it is not.
+
+        Args:
+            url (str): Url of the article to scrape.
+
+        Returns:
+            html (str): Html of the article. If the article is premium content, None is returned.
+            is_premium (bool): True if the article is premium content, False otherwise.
         """
         try:
             html = requests.get(url).content
@@ -74,7 +98,18 @@ class DeSpiegel(Scraper):
 
     def _selenium_login(self, username: str, password: str):
         """
-        TODO DOCSTRING
+        Using selenium, login to the newspaper website to allow scraping of premium content after the login. Does three
+        things:
+            1. Go to main page and accept cookies.
+            2. Login.
+            3. Check if login was successful.
+
+        Args:
+            username (str): Username to login to the newspaper website.
+            password (str): Password to login to the newspaper website.
+
+        Returns:
+            bool: True if login was successful, False otherwise.
         """
         # Go to main page and accept cookies
         self.selenium_driver.get('https://www.spiegel.de/')
