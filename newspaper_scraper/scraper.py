@@ -8,7 +8,8 @@ import datetime as dt
 
 import pandas as pd
 from goose3 import Goose
-from tqdm import tqdm
+from tqdm.auto import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .utils.logger import CustomLogger
 from .utils.utils import flatten_dict
@@ -77,6 +78,8 @@ class Scraper:
                 parsed_infos[key] = pd.Series(value, dtype='object')
 
         parsed_infos = pd.DataFrame(parsed_infos, index=[url])
+        # Rename CleanedText to Text
+        parsed_infos = parsed_infos.rename({'CleanedText': 'Text'}, axis=1)
         parsed_infos.index.name = 'URL'
 
         return parsed_infos
@@ -99,8 +102,8 @@ class Scraper:
             date_to = pd.to_datetime(date_to)
 
             date_range = [day for day in pd.date_range(date_from, date_to) if
-                          not any([day.date() == index_day.date() for index_day in self._db.articles[
-                              self._db.articles.NewspaperID == self.newspaper_id].PubDateIndexPage])
+                          not any([day.date() == index_day.date() for index_day in self._db.df_indexed[
+                              self._db.df_indexed.NewspaperID == self.newspaper_id].PubDateIndexPage])
                           or not skip_existing]
 
             if len(date_range) == 0:
@@ -110,39 +113,37 @@ class Scraper:
             log.info(f'Start scraping articles for {len(date_range):,} days ({date_from.strftime("%d.%m.%y")} - '
                      f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range)} '
                      f'days already indexed.')
-            plog = tqdm(total=0, position=0, bar_format='{desc}')
-            pbar = tqdm(total=len(date_range), position=1)
             counter = 0
-            for day in date_range:
-                counter += 1
+            with logging_redirect_tqdm(loggers=[log]):
+                for day in tqdm(date_range):
+                    counter += 1
 
-                urls, pub_dates = self._get_published_articles(day)
+                    urls, pub_dates = self._get_published_articles(day)
 
-                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
-                    f'Not all pub_dates are datetime objects.'
-                assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
-                    f'Not all pub_dates contain timezone info.'
+                    assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
+                        f'Not all pub_dates are datetime objects.'
+                    assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
+                        f'Not all pub_dates contain timezone info.'
 
-                # Remove query strings from urls
-                urls = [url.split('?')[0] for url in urls]
+                    # Remove query strings from urls
+                    urls = [url.split('?')[0] for url in urls]
 
-                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
-                    f'Not all pub_dates are datetime objects.'
+                    assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
+                        f'Not all pub_dates are datetime objects.'
 
-                urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
-                                     'PubDateIndexPage': pub_dates,
-                                     'DateIndexed': dt.datetime.now()},
-                                    index=urls)
-                # Mark if urls are new
-                urls['new'] = ~urls.index.isin(self._db.articles.index)
+                    urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
+                                         'PubDateIndexPage': pub_dates,
+                                         'DateIndexed': dt.datetime.now()},
+                                        index=urls)
+                    # Mark if urls are new
+                    urls['new'] = ~urls.index.isin(self._db.df_indexed.index)
 
-                # Add new urls to articles table
-                self._db.articles = pd.concat([self._db.articles, urls[urls['new']].drop('new', axis=1)])
-                pbar.update(1)
-                plog.set_description_str(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
-                                         f'for {day.strftime("%d.%m.%Y")}.')
+                    # Add new urls to articles table
+                    self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
+                    log.info(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
+                             f'for {day.strftime("%d.%m.%Y")} (n={len(self._db.df_indexed):,}).')
 
-                self._db.save_articles()
+                    self._db.save_data('df_indexed', mode='replace')
 
     @retry_on_exception
     def scrape_public_articles(self):
@@ -151,8 +152,8 @@ class Scraper:
         the parsed infos are added to the database. If they are not, the article is marked as private. Uses 
         beautifulsoup4 to scrape the articles.
         """
-        to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
-                                      (self._db.articles.Public.isnull())]
+        to_scrape = self._db.df_indexed[(self._db.df_indexed.NewspaperID == self.newspaper_id) &
+                                        (self._db.df_indexed.Public.isnull())]
 
         if to_scrape.empty:
             log.info(f'No articles to scrape.')
@@ -160,40 +161,42 @@ class Scraper:
 
         log.info(f'Start scraping {len(to_scrape):,} articles.')
         counter = 0
-        plog = tqdm(total=0, position=0, bar_format='{desc}')
-        pbar = tqdm(total=len(to_scrape), position=1)
         stats = []
-        for url, row in to_scrape.iterrows():
-            counter += 1
-            raw_html, public = self._soup_get_html(url)
+        with logging_redirect_tqdm(loggers=[log]):
+            for url, row in tqdm(to_scrape.iterrows(), total=len(to_scrape)):
+                counter += 1
+                raw_html, public = self._soup_get_html(url)
 
-            if public:
-                results = self._parse_article(raw_html, url)
+                if public:
+                    results = self._parse_article(raw_html, url)
 
-                # Create empty column in articles table for each column in results
-                for col in results.columns:
-                    if col not in self._db.articles.columns:
-                        self._db.articles[col] = None
-                        log.info(f'New column detected in results. Added column {col} to articles table.')
+                    # Notifies if new columns are detected in results
+                    for col in results.columns:
+                        if col not in self._db.df_scraped_cols:
+                            self._db.df_scraped_cols.append(col)
+                            log.info(f'New column detected: {col}')  # todo print can be removed
 
-                self._db.articles.update(results)
-                self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
-                stats.append(1)
+                    # Add results to articles table
+                    self._db.df_scraped_new = pd.concat([self._db.df_scraped_new, results], axis=0)
+                    self._db.df_scraped_new.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
+                    self._db.df_indexed.at[url, 'Scraped'] = True
 
-                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped. '
-                                         f'(Stats: {stats.count(1)}/{stats.count(0)} '
-                                         f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+                    stats.append(1)
+                    # pbar.write('Wurst')
+                    log.info(f'{counter}/{len(to_scrape)}: Article scraped. '
+                             f'(Stats: {stats.count(1)}/{stats.count(0)} '
+                             f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
 
-            else:
-                stats.append(0)
-                plog.set_description_str(f'{counter}/{len(to_scrape)}: Article is not public. '
-                                         f'(Stats: {stats.count(1)}/{stats.count(0)} '
-                                         f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
-            pbar.update(1)
+                else:
+                    stats.append(0)
+                    log.info(f'{counter}/{len(to_scrape)}: Article is not public. '
+                             f'(Stats: {stats.count(1)}/{stats.count(0)} '
+                             f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
 
-            # Add results to articles table and save
-            self._db.articles.loc[url, 'Public'] = public
-            self._db.save_articles()
+                # Add public information and save both tables
+                self._db.df_indexed.at[url, 'Public'] = public
+                self._db.save_data('df_indexed', mode='replace')
+                self._db.save_data('df_scraped', mode='append')
 
     @retry_on_exception
     def scrape_private_articles(self, username: str, password: str):
@@ -205,9 +208,9 @@ class Scraper:
             username (str): Username to login to the newspaper website.
             password (str): Password to login to the newspaper website.
         """
-        to_scrape = self._db.articles[(self._db.articles.NewspaperID == self.newspaper_id) &
-                                      (self._db.articles.Public == 0) &
-                                      (self._db.articles.DateScrapedHTML.isnull())]
+        to_scrape = self._db.df_indexed[(self._db.df_indexed.NewspaperID == self.newspaper_id) &
+                                        (self._db.df_indexed.Public == 0) &
+                                        (self._db.df_indexed.Scraped != True)]
 
         # Return if no articles to scrape
         if to_scrape.empty:
@@ -228,24 +231,23 @@ class Scraper:
         # Scrape articles
         log.info(f'Start scraping {len(to_scrape)} articles.')
         counter = 0
-        plog = tqdm(total=0, position=0, bar_format='{desc}')
-        pbar = tqdm(total=len(to_scrape), position=1)
-        for url, row in to_scrape.iterrows():
-            counter += 1
+        with logging_redirect_tqdm(loggers=[log]):
+            for url, row in tqdm(to_scrape.iterrows(), total=len(to_scrape)):
+                counter += 1
 
-            # Scrape article
-            self.selenium_driver.get(url)
-            raw_html = self.selenium_driver.page_source
-            results = self._parse_article(raw_html, url)
+                # Scrape article
+                self.selenium_driver.get(url)
+                raw_html = self.selenium_driver.page_source
+                results = self._parse_article(raw_html, url)
 
-            # Add results to articles table and save
-            self._db.articles.update(results)
-            self._db.articles.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
-            self._db.save_articles()
+                # Add results to articles table
+                self._db.df_scraped_new = pd.concat([self._db.df_scraped_new, results], axis=0)
+                self._db.df_scraped_new.loc[url, 'DateScrapedHTML'] = dt.datetime.now()
+                self._db.df_indexed.at[url, 'Scraped'] = True
 
-            # Update progress bar
-            pbar.update(1)
-            plog.set_description_str(f'{counter}/{len(to_scrape)}: Article scraped.')
+                # Save both tables
+                self._db.save_data('df_indexed', mode='replace')
+                self._db.save_data('df_scraped', mode='append')
 
         self.selenium_driver.quit()
 
