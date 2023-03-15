@@ -3,7 +3,7 @@ This module contains the database class. It is used to store the scraped article
 """
 
 import datetime as dt
-import time
+import json
 
 import pandas as pd
 import sqlite3
@@ -15,6 +15,11 @@ from .settings import settings
 # Declare logger
 log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
+# SQL Settings
+sqlite3.lowercase = False
+# Register json converter to save lists in sqlite
+sqlite3.register_adapter(list, lambda lst: json.dumps(lst).encode('utf8'))
+sqlite3.register_converter("json", lambda lst: json.loads(lst.decode('utf8')))
 
 class Database:
     """
@@ -25,6 +30,7 @@ class Database:
     def __init__(self, db_file):
         self.db_file = db_file
         self._df_scraped = None  # Only helper for property self.df_scraped
+        self._df_processed = None  # Only helper for property self.df_processed
 
         # Is defined in self.connect()
         self._cur = None
@@ -34,7 +40,8 @@ class Database:
         self.df_scraped_new = None
 
         self._last_save = {'df_indexed': dt.datetime.now(),
-                           'df_scraped': dt.datetime.now()}
+                           'df_scraped': dt.datetime.now(),
+                           'df_processed': dt.datetime.now()}
 
     @delay_interrupt
     def connect(self):
@@ -44,6 +51,8 @@ class Database:
         self._conn = sqlite3.connect(self.db_file)
         self._cur = self._conn.cursor()
         self.df_indexed = self._load_table('tblArticlesIndexed')
+
+        # For df_scraped table
         try:
             self.df_scraped_cols = pd.read_sql_query("select * from tblArticlesScraped where URL='x'",
                                                      self._conn).columns.tolist()
@@ -53,6 +62,12 @@ class Database:
         self.df_scraped_new = pd.DataFrame(columns=self.df_scraped_cols)
         self.df_scraped_new = self.df_scraped_new.drop('URL', axis=1, errors='ignore')
         self.df_scraped_new.index.name = 'URL'
+
+        # For df_processed table
+        self.df_processed_cols = ['DateProcessed', 'lemmatized', 'stop_words', 'pos_tags', 'tags', 'deps', 'shapes']
+        self.df_processed_new = pd.DataFrame(columns=self.df_processed_cols)
+        self.df_processed_new = self.df_processed_new.drop('URL', axis=1, errors='ignore')
+        self.df_processed_new.index.name = 'URL'
 
     @delay_interrupt
     def close(self):
@@ -75,6 +90,16 @@ class Database:
             self._df_scraped = self._load_table('tblArticlesScraped')
         return self._df_scraped
 
+    @property
+    def df_processed(self):
+        """
+        Return the processed articles DataFrame. If it is not loaded yet, it will be loaded from the database. This may
+        take a while.
+        """
+        if self._df_processed is None:
+            self._df_processed = self._load_table('tblArticlesProcessed')
+        return self._df_processed
+
     def _load_table(self, table_name):
         if table_name == 'tblArticlesIndexed':
             log.info(f'Load database from {self.db_file}.')
@@ -84,8 +109,18 @@ class Database:
                                         self._conn,
                                         index_col='URL',
                                         parse_dates=['PubDateIndexPage', 'DateIndexed'])
-                already_parsed = pd.read_sql_query("SELECT URL FROM tblArticlesScraped", self._conn)
-                _df['Scraped'] = _df.index.isin(already_parsed['URL'])
+
+                try:
+                    already_parsed = pd.read_sql_query("SELECT URL FROM tblArticlesScraped", self._conn)
+                    _df['Scraped'] = _df.index.isin(already_parsed['URL'])
+                except pd.errors.DatabaseError:
+                    _df['Scraped'] = False
+
+                try:
+                    already_processed = pd.read_sql_query("SELECT URL FROM tblArticlesProcessed", self._conn)
+                    _df['Processed'] = _df.index.isin(already_processed['URL'])
+                except pd.errors.DatabaseError:
+                    _df['Processed'] = False
 
                 # Handle boolean values
                 _df.Scraped = _df.Scraped.apply(lambda x: True if x == '1' or x == 1 else x)
@@ -93,8 +128,16 @@ class Database:
                 _df.Public = _df.Public.apply(lambda x: True if x == '1' or x == 1 else x)
                 _df.Public = _df.Public.apply(lambda x: False if x == '0' or x == 0 else x)
 
-                log.info(f'Loaded {len(_df):,} articles from database. {len(_df[_df.Scraped]):,}/{len(_df):,} '
-                         f'already scraped ({len(_df[_df.Scraped]) / len(_df) * 100:.2f}%).')
+                if _df.empty:
+                    percent_scraped = 0
+                    percent_processed = 0
+                else:
+                    percent_scraped = len(_df[_df.Scraped]) / len(_df) * 100
+                    percent_processed = len(_df[_df.Processed]) / len(_df) * 100
+
+                log.info(f'Loaded {len(_df):,} articles from database. '
+                         f'{percent_scraped:.1f}% scraped and '
+                         f'{percent_processed:.1f}% processed.')
             except pd.errors.DatabaseError:
                 _df = pd.DataFrame(columns=['NewspaperID', 'PubDateIndexPage', 'DateIndexed', 'Public', 'Scraped'])
                 _df.index.name = 'URL'
@@ -107,9 +150,15 @@ class Database:
                                     self._conn,
                                     index_col='URL',
                                     parse_dates=['DateScrapedHTML', 'PublishDate'])
+            _df = _df.rename({'CleanedText': 'Text'}, axis=1, errors='ignore')
+
+        elif table_name == 'tblArticlesProcessed':
+            _df = pd.read_sql_query(f"SELECT * FROM tblArticlesProcessed",
+                                    self._conn,
+                                    index_col='URL')
 
         else:
-            raise ValueError('Table name not recognized.')
+            raise ValueError(f'Table {table_name} not recognized.')
         return _df
 
     @delay_interrupt
@@ -146,9 +195,19 @@ class Database:
             if _df.empty:
                 return
 
-            # Convert lists to strings
-            for column in _df.columns:
-                if any([isinstance(x, list) for x in _df[column].values]):
-                    _df[column] = _df[column].apply(lambda x: str(x))
-
             _df.to_sql('tblArticlesScraped', self._conn, index_label='URL', if_exists=mode)
+
+        elif data_name == 'df_processed':
+            if mode == 'append':
+                _df = self.df_processed_new.copy()
+                self.df_processed_new = self.df_processed_new.head(0)
+            else:
+                _df = self.df_processed.copy()
+
+            if _df.empty:
+                return
+
+            _df.to_sql('tblArticlesProcessed', self._conn, index_label='URL', if_exists=mode)
+
+        else:
+            raise ValueError(f'Data {data_name} not recognized.')

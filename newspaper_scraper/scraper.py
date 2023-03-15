@@ -10,6 +10,7 @@ import pandas as pd
 from goose3 import Goose
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
+import spacy
 
 from .utils.logger import CustomLogger
 from .utils.utils import flatten_dict
@@ -43,6 +44,7 @@ class Scraper:
 
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
         self.selenium_driver = None
+        self.spacy = None
 
     def __enter__(self):
         self._db.connect()
@@ -250,6 +252,52 @@ class Scraper:
                 self._db.save_data('df_scraped', mode='append')
 
         self.selenium_driver.quit()
+
+    def nlp(self):
+        """
+        TODO
+        """
+        to_process = self._db.df_scraped[(self._db.df_indexed.NewspaperID == self.newspaper_id) &
+                                            (self._db.df_indexed.Processed != True)]
+
+        # Return if no articles to scrape
+        if to_process.empty:
+            log.info(f'No articles to process.')
+            return
+
+        # Initialize spacy:
+        if self.spacy is None:
+            self.spacy = spacy.load('de_core_news_sm') # todo: add language as parameter
+            log.info('Spacy initialized.')
+
+        # Process articles
+        log.info(f'Start processing {len(to_process):,} articles.')
+        counter = 0
+        with logging_redirect_tqdm(loggers=[log]):
+            for url, row in tqdm(to_process.iterrows(), total=len(to_process)):
+                counter += 1
+
+                # Process article
+                results = self._process_article(row['Text'], url)
+
+                # Add results to articles table
+                self._db.df_processed_new = pd.concat([self._db.df_processed_new, results], axis=0)
+                self._db.df_processed_new.loc[url, 'DateProcessed'] = dt.datetime.now()
+                self._db.df_indexed.at[url, 'Processed'] = True
+
+                # Save both tables
+                self._db.save_data('df_indexed', mode='replace')
+                self._db.save_data('df_processed', mode='append')
+    def _process_article(self, text, url):
+        doc = self.spacy(text)
+        data = pd.DataFrame(
+            [[[token.lemma_ for token in doc], [token.is_stop for token in doc], [token.pos_ for token in doc],
+              [token.tag_ for token in doc], [token.dep_ for token in doc], [token.shape_ for token in doc]]],
+            columns=['lemmatized', 'stop_words', 'pos_tags', 'tags', 'deps', 'shapes'],
+            index=[url]
+        )
+        return data
+
 
     def _get_published_articles(self, day):
         """
