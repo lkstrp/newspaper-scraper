@@ -76,6 +76,7 @@ class Database:
         """
         self.save_data('df_indexed', mode='replace', force=True)
         self.save_data('df_scraped', mode='append', force=True)
+        self.save_data('df_processed', mode='append', force=True)
 
         self._cur.close()
         self._conn.close()

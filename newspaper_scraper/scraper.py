@@ -1,6 +1,6 @@
 """
-This module contains the Scraper class which is used to scrape articles from a newspaper website. It is only used as a
-base class for the actual scrapers.
+This module contains the NewspaperManager class which is used to scrape articles from a newspaper website. It is only
+used as a base class for the actual scrapers.
 """
 
 import re
@@ -23,9 +23,9 @@ from .database import Database
 log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 
-class Scraper:
+class NewspaperManager:
     """
-    The Scraper class is used to scrape articles from a newspaper website. It is only used as a base class for the
+    The NewspaperManager class is used to scrape articles from a newspaper website. It is only used as a base class for the
     actual scrapers and can not be instantiated directly. Each newspaper scraper needs to inherit from this class and
     implement the _get_published_articles, _soup_get_html, and _selenium_login methods.
     

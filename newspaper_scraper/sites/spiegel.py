@@ -1,6 +1,6 @@
 """
 This module contains the class to scrape articles from the "Spiegel" newspaper (https://www.spiegel.de/).
-The class inherits from the Scraper class and needs an implementation of the abstract methods.
+The class inherits from the NewspaperManager class and needs an implementation of the abstract methods.
 With a similar implementation, it is possible to scrape articles from other news websites.
 """
 
@@ -19,15 +19,15 @@ from selenium.common.exceptions import TimeoutException
 
 from ..utils.logger import CustomLogger
 from ..settings import settings
-from ..scraper import Scraper
+from ..scraper import NewspaperManager
 
 # Declare logger
 log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 
-class DeSpiegel(Scraper):
+class DeSpiegel(NewspaperManager):
     """
-    This class inherits from the Scraper class and implements the newspaper specific methods. 
+    This class inherits from the NewspaperManager class and implements the newspaper specific methods.
     These methods are:
         - _get_published_articles: Index articles published on a given day and return the urls and publication dates.
         - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
