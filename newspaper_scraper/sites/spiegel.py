@@ -17,12 +17,8 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.common.exceptions import ElementNotInteractableException
 from selenium.common.exceptions import TimeoutException
 
-from ..utils.logger import CustomLogger
-from ..settings import settings
+from ..utils.logger import log
 from ..scraper import NewspaperManager
-
-# Declare logger
-log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 
 class DeSpiegel(NewspaperManager):

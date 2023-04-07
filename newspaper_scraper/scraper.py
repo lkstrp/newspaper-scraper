@@ -12,22 +12,18 @@ from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import spacy
 
-from .utils.logger import CustomLogger
+from .utils.logger import log
 from .utils.utils import flatten_dict
 from .utils.utils import get_selenium_webdriver
 from .utils.utils import retry_on_exception
-from .settings import settings
 from .database import Database
-
-# Declare logger
-log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 
 class NewspaperManager:
     """
-    The NewspaperManager class is used to scrape articles from a newspaper website. It is only used as a base class for the
-    actual scrapers and can not be instantiated directly. Each newspaper scraper needs to inherit from this class and
-    implement the _get_published_articles, _soup_get_html, and _selenium_login methods.
+    The NewspaperManager class is used to scrape articles from a newspaper website. It is only used as a base class for
+    the actual scrapers and can not be instantiated directly. Each newspaper scraper needs to inherit from this class
+    and implement the _get_published_articles, _soup_get_html, and _selenium_login methods.
     
     It contains the following methods:
         - index_published_articles: Scrapes all articles published between date_from and date_to.
@@ -255,10 +251,10 @@ class NewspaperManager:
 
     def nlp(self):
         """
-        TODO
+        Processes all scraped articles, which have not been processed yet. Uses spacy to process the articles.
         """
         to_process = self._db.df_scraped[(self._db.df_indexed.NewspaperID == self.newspaper_id) &
-                                            (self._db.df_indexed.Processed != True)]
+                                         (self._db.df_indexed.Processed != True)]
 
         # Return if no articles to scrape
         if to_process.empty:
@@ -267,7 +263,7 @@ class NewspaperManager:
 
         # Initialize spacy:
         if self.spacy is None:
-            self.spacy = spacy.load('de_core_news_sm') # todo: add language as parameter
+            self.spacy = spacy.load('de_core_news_sm')  # todo: add language as parameter
             log.info('Spacy initialized.')
 
         # Process articles
@@ -288,6 +284,7 @@ class NewspaperManager:
                 # Save both tables
                 self._db.save_data('df_indexed', mode='replace')
                 self._db.save_data('df_processed', mode='append')
+
     def _process_article(self, text, url):
         doc = self.spacy(text)
         data = pd.DataFrame(
@@ -297,7 +294,6 @@ class NewspaperManager:
             index=[url]
         )
         return data
-
 
     def _get_published_articles(self, day):
         """

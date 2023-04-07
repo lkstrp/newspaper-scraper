@@ -8,12 +8,9 @@ import json
 import pandas as pd
 import sqlite3
 
-from .utils.logger import CustomLogger
+from .utils.logger import log
 from .utils.utils import delay_interrupt
 from .settings import settings
-
-# Declare logger
-log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
 
 # SQL Settings
 sqlite3.lowercase = False
@@ -21,9 +18,10 @@ sqlite3.lowercase = False
 sqlite3.register_adapter(list, lambda lst: json.dumps(lst).encode('utf8'))
 sqlite3.register_converter("json", lambda lst: json.loads(lst.decode('utf8')))
 
+
 class Database:
     """
-    todo docstring
+    This class is used to store the scraped articles in a SQLite database.
     """
 
     @delay_interrupt
@@ -38,6 +36,8 @@ class Database:
         self.df_indexed = None
         self.df_scraped_cols = None
         self.df_scraped_new = None
+        self.df_processed_cols = None
+        self.df_processed_new = None
 
         self._last_save = {'df_indexed': dt.datetime.now(),
                            'df_scraped': dt.datetime.now(),

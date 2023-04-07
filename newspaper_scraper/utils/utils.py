@@ -13,11 +13,8 @@ import signal
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 
-from .logger import CustomLogger
-from ..settings import settings
-
-# Declare logger
-log = CustomLogger('newspaper-scraper', log_file=settings.log_file)
+from ..utils.logger import log
+from .. import settings
 
 
 def retry_on_exception(func):
@@ -34,8 +31,8 @@ def retry_on_exception(func):
             except KeyboardInterrupt:
                 sys.exit()
             except Exception as e:
-                if settings.retry_on_exception:
-                    log.exception(f'Exception while executing {func.__name__}: {e}.')
+                if settings['retry_on_exception']:
+                    log.warning(f'Exception while executing {func.__name__}: {e.__class__.__name__}.')
                     log.info('Retrying in 100 seconds...')
                     time.sleep(100)
                 else:
@@ -63,6 +60,7 @@ def delay_interrupt(func):
     return _wrapper
 
 
+# noinspection PyUnresolvedReferences
 def get_selenium_webdriver():
     """
     Returns a selenium webdriver object.
@@ -78,6 +76,7 @@ def get_selenium_webdriver():
 
     # Linux
     elif sys.platform == 'linux':
+        # noinspection PyPackageRequirements
         from webdriver.chrome.options import Options
         chrome_options = Options()
         chrome_options.add_argument('--headless')
