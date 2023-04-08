@@ -1,7 +1,7 @@
-jupyter
+numpy
 pandas
 selenium
 beautifulsoup4
-goose3
+goose3==3.1.11
 tqdm
 spacy
