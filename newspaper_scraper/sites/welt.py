@@ -127,8 +127,10 @@ class DeWelt(NewspaperManager):
         # Check if login was successful
         try:
             self.selenium_driver.get('https://www.welt.de/meinewelt/')
-            self.selenium_driver.find_element(By.CSS_SELECTOR, 'div[data-component-name="home"]').find_element(
-                By.CSS_SELECTOR, 'div[name="greeting"]')
+            WebDriverWait(self.selenium_driver, 10).until(
+                ec.presence_of_element_located((By.CSS_SELECTOR, 'div[data-component-name="home"]')))
+            _elem = self.selenium_driver.find_element(By.CSS_SELECTOR, 'div[data-component-name="home"]')
+            WebDriverWait(_elem, 10).until(ec.presence_of_element_located((By.CSS_SELECTOR, 'div[name="greeting"]')))
             self.selenium_driver.get('https://www.welt.de')
             log.info('Logged in to Welt Plus.')
             return True

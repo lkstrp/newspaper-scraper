@@ -140,7 +140,8 @@ class Database:
                          f'{percent_scraped:.1f}% scraped and '
                          f'{percent_processed:.1f}% processed.')
             except pd.errors.DatabaseError:
-                _df = pd.DataFrame(columns=['NewspaperID', 'PubDateIndexPage', 'DateIndexed', 'Public', 'Scraped'])
+                _df = pd.DataFrame(columns=['NewspaperID', 'PubDateIndexPage', 'DateIndexed', 'Public', 'Scraped',
+                                            'Processed'])
                 _df.index.name = 'URL'
                 log.info(f'No database found. Created new database.')
 
@@ -150,7 +151,7 @@ class Database:
             _df = pd.read_sql_query(f"SELECT * FROM tblArticlesScraped",
                                     self._conn,
                                     index_col='URL',
-                                    parse_dates=['DateScrapedHTML', 'PublishDate'])
+                                    parse_dates=['DateScrapedHTML'])
             _df = _df.rename({'CleanedText': 'Text'}, axis=1, errors='ignore')
 
         elif table_name == 'tblArticlesProcessed':
@@ -195,8 +196,18 @@ class Database:
 
             if _df.empty:
                 return
+            try:
+                _df.to_sql('tblArticlesScraped', self._conn, index_label='URL', if_exists=mode)
+            except sqlite3.OperationalError:
+                # Add the missing column, if new columns were added to the DataFrame and are not in the database yet
+                self._cur.execute("PRAGMA table_info(tblArticlesScraped)")
+                columns_info = self._cur.fetchall()
+                for col in _df.columns:
+                    column_exists = any(column_info[1] == col for column_info in columns_info)
+                    if not column_exists:
+                        self._cur.execute("ALTER TABLE tblArticlesScraped ADD COLUMN '{}' TEXT".format(col))
 
-            _df.to_sql('tblArticlesScraped', self._conn, index_label='URL', if_exists=mode)
+                _df.to_sql('tblArticlesScraped', self._conn, index_label='URL', if_exists=mode)
 
         elif data_name == 'df_processed':
             if mode == 'append':

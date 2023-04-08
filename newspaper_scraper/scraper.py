@@ -7,11 +7,16 @@ import re
 import datetime as dt
 import sys
 
+import numpy as np
 import pandas as pd
 from goose3 import Goose
 from tqdm.auto import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-import spacy
+
+try:
+    import spacy
+except ImportError:
+    spacy = None
 
 from .utils.logger import log
 from .settings import settings
@@ -30,7 +35,7 @@ class NewspaperManager:
     It contains the following methods:
         - index_published_articles: Scrapes all articles published between date_from and date_to.
         - scrape_public_articles: Checks for all indexed if they are public and scrapes them if they are.
-        - scrape_private_articles: Scrapes all private articles. Needs a valid login.
+        - scrape_premium_articles: Scrapes all private articles. Needs a valid login.
         - _parse_article: Parses the HTML of an article and returns a DataFrame with the parsed infos.
         - _get_published_articles: Not implemented. Needs to be implemented in the actual scraper.
         - _soup_get_html: Not implemented. Needs to be implemented in the actual scraper.
@@ -56,10 +61,9 @@ class NewspaperManager:
             else:
                 try:
                     self._selenium_driver = get_selenium_webdriver()
-                except Exception as e:
-                    log.error(f'Could not get selenium webdriver. Please set a selenium_driver property via '
-                              f'newspaper_scraper.settings.selenium_driver = <driver>.')
-                    sys.exit(1)
+                except Exception:
+                    raise Exception(f'Could not get selenium webdriver. Please set a selenium_driver property via '
+                                    f'newspaper_scraper.settings.selenium_driver = <driver>.')
         return self._selenium_driver
 
     @property
@@ -67,8 +71,15 @@ class NewspaperManager:
         """
         Returns the spacy nlp model. If no model is set, it loads the model from spacy.
         """
+        if spacy is None:
+            raise ImportError('To use the nlp functionality, additional dependencies need to be installed. Please run '
+                              '"pip install newspaper_scraper[nlp]" to install them.')
         if self._spacy_nlp is None:
-            self._spacy_nlp = spacy.load(model)
+            try:
+                self._spacy_nlp = spacy.load(model)
+            except OSError:
+                raise OSError(f'Could not load spacy model "{model}". Please download it via "python -m spacy download '
+                              f'{model}".')
         return self._spacy_nlp
 
     def __enter__(self):
@@ -116,61 +127,71 @@ class NewspaperManager:
         """
         Indexes all articles published between date_from and date_to for a given newspaper. Indexing means that the
         articles are added to the database and their URLs are stored. The actual scraping of the articles is done
-        separately with the scrape_public_articles and scrape_private_articles methods.
+        separately with the scrape_public_articles and scrape_premium_articles methods.
 
         Args:
             date_from (dt.datetime or str): The first day to scrape articles from.
             date_to (dt.datetime or str): The last day to scrape articles from.
             skip_existing (bool, optional): If True, days that are already indexed are skipped. Defaults to True.
         """
+        date_from = pd.to_datetime(date_from)
+        date_to = pd.to_datetime(date_to)
 
-        if date_from:
-            date_from = pd.to_datetime(date_from)
-            date_to = pd.to_datetime(date_to)
+        already_indexed = self._db.df_indexed[(self._db.df_indexed.NewspaperID == self.newspaper_id)]
 
-            date_range = [day for day in pd.date_range(date_from, date_to) if
-                          not any([day.date() == index_day.date() for index_day in self._db.df_indexed[
-                              self._db.df_indexed.NewspaperID == self.newspaper_id].PubDateIndexPage])
-                          or not skip_existing]
+        # Convert already_indexed.PubDateIndexPage to set of dates for faster lookup
+        indexed_dates = {index_day.date() for index_day in already_indexed.PubDateIndexPage}
+        # Create pd.date_range and convert it to a numpy array of dates for faster lookup
+        date_range = pd.date_range(date_from, date_to)
+        date_range_dates = np.array([day.date() for day in date_range])
 
-            if len(date_range) == 0:
-                log.info(f'No new days to scrape. Pass skip_existing=False to scrape all days again.')
-                return
+        if skip_existing:
+            date_range = date_range[~np.in1d(date_range_dates, list(indexed_dates))]
+        else:
+            date_range = date_range.tolist()
 
-            log.info(f'Start scraping articles for {len(date_range):,} days ({date_from.strftime("%d.%m.%y")} - '
-                     f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range)} '
-                     f'days already indexed.')
-            counter = 0
-            with logging_redirect_tqdm(loggers=[log]):
-                for day in tqdm(date_range):
-                    counter += 1
+        if len(date_range) == 0:
+            log.info(f'No new days to scrape. Pass skip_existing=False to scrape all days again.')
+            return
 
-                    urls, pub_dates = self._get_published_articles(day)
+        log.info(f'Start scraping articles for {len(date_range):,} days ({date_from.strftime("%d.%m.%y")} - '
+                 f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range)} '
+                 f'days already indexed.')
+        counter = 0
+        with logging_redirect_tqdm(loggers=[log]):
+            for day in tqdm(date_range):
+                counter += 1
 
-                    assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
-                        f'Not all pub_dates are datetime objects.'
-                    assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
-                        f'Not all pub_dates contain timezone info.'
+                urls, pub_dates = self._get_published_articles(day)
 
-                    # Remove query strings from urls
-                    urls = [url.split('?')[0] for url in urls]
+                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
+                    f'Not all pub_dates are datetime objects.'
+                assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
+                    f'Not all pub_dates contain timezone info.'
 
-                    assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
-                        f'Not all pub_dates are datetime objects.'
+                # Remove query strings from urls
+                urls = [url.split('?')[0] for url in urls]
 
-                    urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
-                                         'PubDateIndexPage': pub_dates,
-                                         'DateIndexed': dt.datetime.now()},
-                                        index=urls)
-                    # Mark if urls are new
-                    urls['new'] = ~urls.index.isin(self._db.df_indexed.index)
+                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
+                    f'Not all pub_dates are datetime objects.'
 
-                    # Add new urls to articles table
-                    self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
-                    log.info(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
-                             f'for {day.strftime("%d.%m.%Y")} (n={len(self._db.df_indexed):,}).')
+                urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
+                                     'PubDateIndexPage': pub_dates,
+                                     'DateIndexed': dt.datetime.now(),
+                                     'Public': None,
+                                     'Scraped': False,
+                                     'Processed': False},
+                                    index=urls)
+                # Mark if urls are new
+                urls['new'] = ~urls.index.isin(self._db.df_indexed.index)
+                urls['new'] = urls['new'].astype(bool)
 
-                    self._db.save_data('df_indexed', mode='replace')
+                # Add new urls to articles table
+                self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
+                log.info(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
+                         f'for {day.strftime("%d.%m.%Y")} (n={len(self._db.df_indexed):,}).')
+
+                self._db.save_data('df_indexed', mode='replace')
 
     @retry_on_exception
     def scrape_public_articles(self):
@@ -186,7 +207,7 @@ class NewspaperManager:
             log.info(f'No articles to scrape.')
             return
 
-        log.info(f'Start scraping {len(to_scrape):,} articles.')
+        log.info(f'Start scraping {len(to_scrape):,} public articles.')
         counter = 0
         stats = []
         with logging_redirect_tqdm(loggers=[log]):
@@ -201,7 +222,7 @@ class NewspaperManager:
                     for col in results.columns:
                         if col not in self._db.df_scraped_cols:
                             self._db.df_scraped_cols.append(col)
-                            log.info(f'New column detected: {col}')  # todo print can be removed
+                            # log.info(f'New column detected: {col}')  # todo print can be removed
 
                     # Add results to articles table
                     self._db.df_scraped_new = pd.concat([self._db.df_scraped_new, results], axis=0)
@@ -209,16 +230,17 @@ class NewspaperManager:
                     self._db.df_indexed.at[url, 'Scraped'] = True
 
                     stats.append(1)
-                    # pbar.write('Wurst')
-                    log.info(f'{counter}/{len(to_scrape)}: Article scraped. '
-                             f'(Stats: {stats.count(1)}/{stats.count(0)} '
-                             f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+                    # log.info(f'{counter}/{len(to_scrape)}: Article scraped. '
+                    #          f'(Stats: {stats.count(1)}/{stats.count(0)} '
+                    #          f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+                    # todo allow setting for more detailed prints
 
                 else:
                     stats.append(0)
-                    log.info(f'{counter}/{len(to_scrape)}: Article is not public. '
-                             f'(Stats: {stats.count(1)}/{stats.count(0)} '
-                             f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+                    # log.info(f'{counter}/{len(to_scrape)}: Article is not public. '
+                    #          f'(Stats: {stats.count(1)}/{stats.count(0)} '
+                    #          f'{stats[-100:].count(1)}/{stats[-100:].count(0)}).')
+                    # todo allow setting for more detailed prints
 
                 # Add public information and save both tables
                 self._db.df_indexed.at[url, 'Public'] = public
@@ -226,7 +248,7 @@ class NewspaperManager:
                 self._db.save_data('df_scraped', mode='append')
 
     @retry_on_exception
-    def scrape_private_articles(self, username: str, password: str):
+    def scrape_premium_articles(self, username: str, password: str):
         """
         Scrapes all private articles, which have not been scraped yet and are marked as private. Uses selenium to
         scrape the articles. Requires a username and password to login to the newspaper website.
@@ -247,11 +269,11 @@ class NewspaperManager:
         # Login
         login_successful = self._selenium_login(username=username, password=password)
         if not login_successful:
-            log.warning(f'Login failed. Skipping scraping.')
+            log.warning(f'Login failed. Skip scraping.')
             return
 
         # Scrape articles
-        log.info(f'Start scraping {len(to_scrape)} articles.')
+        log.info(f'Start scraping {len(to_scrape)} premium articles.')
         counter = 0
         with logging_redirect_tqdm(loggers=[log]):
             for url, row in tqdm(to_scrape.iterrows(), total=len(to_scrape)):
@@ -277,8 +299,9 @@ class NewspaperManager:
         """
         Processes all scraped articles, which have not been processed yet. Uses spacy to process the articles.
         """
-        to_process = self._db.df_scraped[(self._db.df_indexed.NewspaperID == self.newspaper_id) &
-                                         (self._db.df_indexed.Processed != True)]
+        to_process = self._db.df_scraped[(self._db.df_indexed.reindex(self._db.df_scraped.index).NewspaperID ==
+                                          self.newspaper_id) &
+                                         (self._db.df_indexed.reindex(self._db.df_scraped.index).Processed != True)]
 
         # Return if no articles to scrape
         if to_process.empty:

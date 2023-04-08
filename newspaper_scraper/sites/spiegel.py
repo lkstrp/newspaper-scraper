@@ -63,10 +63,16 @@ class DeSpiegel(NewspaperManager):
 
         # Get articles publication dates
         time_regex = re.compile(r'\d{1,2}\.\s\w+,\s\d{1,2}\.\d{2}\sUhr')
-        pub_dates = [pd.to_datetime(f'{article.find(string=time_regex)}; {day.year}', format='%d. %B, %H.%M Uhr; %Y')
-                     for article in articles]
-        # Add timezone Europe/Berlin to pub_dates
-        pub_dates = [pub_date.tz_localize('Europe/Berlin') for pub_date in pub_dates]
+        pub_dates = []
+        for article in articles:
+            try:
+                pub_dates.append(pd.to_datetime(f'{article.find(string=time_regex)}; {day.year}',
+                                                format='%d. %B, %H.%M Uhr; %Y').tz_localize('Europe/Berlin'))
+
+            except ValueError:
+                log.warning(f'Could not parse publication date for article {article.find("a")["href"]}: '
+                            f'{article.find(string=time_regex)}.')
+                pub_dates.append(dt.datetime(day.year, day.month, day.day, tzinfo=dt.timezone.utc))
 
         assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
 
@@ -121,8 +127,16 @@ class DeSpiegel(NewspaperManager):
         self.selenium_driver.find_element(By.NAME, 'loginform:password').send_keys(password)
         self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
 
-        # Click on Anmelden button because sometimes the login is not saved on main page
+        # Go to main page
         self.selenium_driver.get('https://www.spiegel.de/')
+
+        # Accept cookies again, if needed
+        privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
+            ec.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
+        self.selenium_driver.switch_to.frame(privacy_frame)
+        self.selenium_driver.find_element(By.XPATH, "//button[contains(text(), 'Akzeptieren und weiter')]").click()
+
+        # Click on Anmelden button because sometimes the login is not saved on main page
         try:
             self.selenium_driver.find_element(By.XPATH, '//a[@data-sara-link="gruppenkonto"]').click()
         except ElementNotInteractableException:
