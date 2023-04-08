@@ -12,6 +12,7 @@ class _Settings:
     _log_file = 'logs.log'
     retry_on_exception = True
     save_interval = 60
+    selenium_driver = None
 
     _description = {
         'log_file': 'Path to the log file. If None, no log file is created.',

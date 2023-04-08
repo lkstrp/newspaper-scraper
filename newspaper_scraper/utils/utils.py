@@ -6,6 +6,7 @@ This module contains some utility functions and decorators:
     - flatten_dict: Recursively flattens a nested dictionary.
 """
 import sys
+import os
 import functools
 import time
 import signal
@@ -31,7 +32,7 @@ def retry_on_exception(func):
             except KeyboardInterrupt:
                 sys.exit()
             except Exception as e:
-                if settings['retry_on_exception']:
+                if settings.retry_on_exception:
                     log.warning(f'Exception while executing {func.__name__}: {e.__class__.__name__}.')
                     log.info('Retrying in 100 seconds...')
                     time.sleep(100)
@@ -72,7 +73,8 @@ def get_selenium_webdriver():
 
     # MacOS
     elif sys.platform == 'darwin':
-        driver = webdriver.Edge(service=Service("/Users/lukas/lt_data/Code/driver/msedgedriver"))
+        driver = webdriver.Edge(service=Service(os.path.abspath(os.path.join(os.getcwd(), "..", "..", "Driver",
+                                                                             "msedgedriver"))))
 
     # Linux
     elif sys.platform == 'linux':

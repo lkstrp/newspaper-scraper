@@ -5,6 +5,7 @@ used as a base class for the actual scrapers.
 
 import re
 import datetime as dt
+import sys
 
 import pandas as pd
 from goose3 import Goose
@@ -13,6 +14,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 import spacy
 
 from .utils.logger import log
+from .settings import settings
 from .utils.utils import flatten_dict
 from .utils.utils import get_selenium_webdriver
 from .utils.utils import retry_on_exception
@@ -39,8 +41,35 @@ class NewspaperManager:
         self._db = Database(db_file=db_file)
 
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
-        self.selenium_driver = None
-        self.spacy = None
+        self._selenium_driver = None
+        self._spacy_nlp = None
+
+    @property
+    def selenium_driver(self):
+        """
+        Returns the selenium driver. If no driver is set, it tries to get one from the settings file. If this fails, it
+        tries to get one from the utils.utils.get_selenium_webdriver function.
+        """
+        if self._selenium_driver is None:
+            if settings.selenium_driver:
+                self._selenium_driver = settings.selenium_driver
+            else:
+                try:
+                    self._selenium_driver = get_selenium_webdriver()
+                except Exception as e:
+                    log.error(f'Could not get selenium webdriver. Please set a selenium_driver property via '
+                              f'newspaper_scraper.settings.selenium_driver = <driver>.')
+                    sys.exit(1)
+        return self._selenium_driver
+
+    @property
+    def spacy_nlp(self, model='de_core_news_sm'):
+        """
+        Returns the spacy nlp model. If no model is set, it loads the model from spacy.
+        """
+        if self._spacy_nlp is None:
+            self._spacy_nlp = spacy.load(model)
+        return self._spacy_nlp
 
     def __enter__(self):
         self._db.connect()
@@ -215,11 +244,6 @@ class NewspaperManager:
             log.info(f'No articles to scrape.')
             return
 
-        # Initialize selenium webdriver
-        if self.selenium_driver is None:
-            self.selenium_driver = get_selenium_webdriver()
-            log.info('Selenium webdriver initialized.')
-
         # Login
         login_successful = self._selenium_login(username=username, password=password)
         if not login_successful:
@@ -261,11 +285,6 @@ class NewspaperManager:
             log.info(f'No articles to process.')
             return
 
-        # Initialize spacy:
-        if self.spacy is None:
-            self.spacy = spacy.load('de_core_news_sm')  # todo: add language as parameter
-            log.info('Spacy initialized.')
-
         # Process articles
         log.info(f'Start processing {len(to_process):,} articles.')
         counter = 0
@@ -286,7 +305,7 @@ class NewspaperManager:
                 self._db.save_data('df_processed', mode='append')
 
     def _process_article(self, text, url):
-        doc = self.spacy(text)
+        doc = self.spacy_nlp(text)
         data = pd.DataFrame(
             [[[token.lemma_ for token in doc], [token.is_stop for token in doc], [token.pos_ for token in doc],
               [token.tag_ for token in doc], [token.dep_ for token in doc], [token.shape_ for token in doc]]],
