@@ -1,6 +1,7 @@
 # __init__.py
 
 from .settings import settings
+from .database import Database
 
 from .sites.spiegel import DeSpiegel
 from .sites.bild import DeBild
