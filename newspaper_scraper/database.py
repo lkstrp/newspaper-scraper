@@ -104,6 +104,7 @@ class Database:
                         DateIndexed TIMESTAMP,
                         NewspaperID TEXT,
                         PubDateIndexPage TIMESTAMP,
+                        Edition TEXT,
                         Public INTEGER,
                         Scraped INTEGER,
                         Processed INTEGER
@@ -194,6 +195,7 @@ class Database:
 
         if data_name == 'df_indexed':
             _df = self.df_indexed.copy()
+            assert self.df_indexed.index.is_unique, 'Index of df_indexed is not unique.'
 
         elif data_name == 'df_scraped':
             _df = self.df_scraped_new.copy() if mode == 'append' else self.df_scraped.copy()

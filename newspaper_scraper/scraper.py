@@ -186,13 +186,95 @@ class NewspaperManager:
                                      'Processed': False},
                                     index=urls)
                 # Mark if urls are new
-                urls['new'] = ~urls.index.isin(self._db.df_indexed.index)
-                urls['new'] = urls['new'].astype(bool)
+                urls['new'] = ~urls.index.isin(self._db.df_indexed.index).astype(bool)
 
                 # Add new urls to articles table
                 self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
                 log.info(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
                          f'for {day.strftime("%d.%m.%Y")} (n={len(self._db.df_indexed):,}).')
+
+                self._db.save_data('df_indexed', mode='replace')
+
+    @retry_on_exception
+    def index_articles_by_edition(self, edition_from: str, edition_to: str, editions_per_year=55, skip_existing=True):
+        """
+        Index all articles published in between two editions for a given newspaper. Indexing means that the
+        articles are added to the database and their URLs are stored. The actual scraping of the articles is done
+        separately with the scrape_public_articles and scrape_premium_articles methods.
+
+        Args:
+            edition_from (str): The first edition to scrape articles from. The format must be 'YYYY-EDITION'
+                (e.g. '2019-1').
+            edition_to (str): The last edition to scrape articles from. The format must be 'YYYY-EDITION'
+                (e.g. '2019-1').
+            editions_per_year (int, optional): The number of editions per year. Defaults to 55. If edtions across
+                multiple years are scraped, this number is used for all years in between.
+            skip_existing (bool, optional): If True, days that are already indexed are skipped. Defaults to True.
+        """
+        if re.match(r'\d{4}-(?!0)\d{1,2}', edition_from) is None:
+            raise ValueError(f'edition_from must be in the format "YYYY-EDITION" (e.g. "2019-1").')
+        if re.match(r'\d{4}-(?!0)\d{1,2}', edition_to) is None:
+            raise ValueError(f'edition_to must be in the format "YYYY-EDITION" (e.g. "2019-1").')
+
+        year_from = int(edition_from.split('-')[0])
+        year_to = int(edition_to.split('-')[0])
+
+        edition_from = int(edition_from.split('-')[1])
+        edition_to = int(edition_to.split('-')[1])
+
+        edition_range = []
+        for year in range(year_from, year_to + 1):
+            if year == year_from and year == year_to:
+                editions = range(edition_from, edition_to + 1)
+            elif year == year_from:
+                editions = range(edition_from, editions_per_year + 1)
+            elif year == year_to:
+                editions = range(1, edition_to + 1)
+            else:
+                editions = range(1, editions_per_year + 1)
+
+            for edition in editions:
+                edition_range.append(f'{year}-{edition}')
+
+        already_indexed = self._db.df_indexed[(self._db.df_indexed.NewspaperID == self.newspaper_id)]
+        indexed_editions = [edition for edition in already_indexed.Edition.unique().tolist()]
+
+        if skip_existing:
+            edition_range = [edition for edition in edition_range if edition not in indexed_editions]
+
+        if len(edition_range) == 0:
+            log.info(f'No new editions to scrape. Pass skip_existing=False to scrape all days again.')
+            return
+
+        log.info(f'Start scraping articles for {len(edition_range):,} editions ({year_from}-{edition_from} - '
+                 f'{year_to}-{edition_to}).')  # todo add already indexed editions
+
+        counter = 0
+        with logging_redirect_tqdm(loggers=[log]):
+            for edition in tqdm(edition_range, total=len(edition_range)):
+                counter += 1
+                year = int(edition.split('-')[0])
+                edition = int(edition.split('-')[1])
+
+                urls = self._get_articles_by_edition(year, edition)
+
+                # Remove query strings from urls
+                urls = [url.split('?')[0] for url in urls]
+
+                urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
+                                     'Edition': f'{year}-{edition}',
+                                     'DateIndexed': dt.datetime.now(),
+                                     'Public': None,
+                                     'Scraped': False,
+                                     'Processed': False},
+                                    index=urls)
+                # Mark if urls are new
+                urls['new'] = ~urls.index.isin(self._db.df_indexed.index).astype(bool)
+
+                # Add new urls to articles table
+                self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
+                log.info(f'{counter}/{len(edition_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
+                         f'for {year}-{edition} (n={len(self._db.df_indexed):,}).')
 
                 self._db.save_data('df_indexed', mode='replace')
 
@@ -268,6 +350,10 @@ class NewspaperManager:
             log.info(f'No articles to scrape.')
             return
 
+        # Reset selenium driver
+        if self._selenium_driver is not None:
+            self._selenium_driver.close()
+        self._selenium_driver = None
         # Login
         login_successful = self._selenium_login(username=username, password=password)
         if not login_successful:
@@ -282,8 +368,7 @@ class NewspaperManager:
                 counter += 1
 
                 # Scrape article
-                self.selenium_driver.get(url)
-                raw_html = self.selenium_driver.page_source
+                raw_html = self._selenium_get_html(url)
                 results = self._parse_article(raw_html, url)
 
                 # Add results to articles table
@@ -359,6 +444,14 @@ class NewspaperManager:
         Exists only as a placeholder. Needs to be implemented by the child class for each newspaper.
         """
         raise NotImplemented
+
+    def _selenium_get_html(self, url):
+        """
+        Function to get the html of a private article. Uses selenium to get the html. Can be optionally overwritten by
+        the child if a different method is needed.
+        """
+        self.selenium_driver.get(url)
+        return self.selenium_driver.page_source
 
     def _selenium_login(self, username: str, password: str):
         """
