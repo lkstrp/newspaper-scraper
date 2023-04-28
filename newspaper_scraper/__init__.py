@@ -10,7 +10,7 @@ from .sites.zeit import DeZeit
 from .sites.handelsblatt import DeHandelsblatt
 
 # Version of the newspaper_scraper package
-__version__ = "0.1.3"
+__version__ = "0.2.0"
 
 Spiegel = DeSpiegel
 Bild = DeBild
