@@ -5,7 +5,6 @@ used as a base class for the actual scrapers.
 
 import re
 import datetime as dt
-import sys
 
 import numpy as np
 import pandas as pd
@@ -20,6 +19,7 @@ except ImportError:
 
 from .utils.logger import log
 from .settings import settings
+from .constants import NLP_ATTRIBUTES
 from .utils.utils import flatten_dict
 from .utils.utils import get_selenium_webdriver
 from .utils.utils import retry_on_exception
@@ -43,9 +43,10 @@ class NewspaperManager:
     """
 
     def __init__(self, db_file):
-        self._db = Database(db_file=db_file)
-
         self.newspaper_id = re.sub(r'(?<!^)(?=[A-Z])', '_', self.__class__.__name__).lower()
+        log.info(f'Initializing {self.newspaper_id} scraper.')
+
+        self._db = Database(db_file=db_file)
         self._selenium_driver = None
         self._spacy_nlp = None
 
@@ -155,7 +156,7 @@ class NewspaperManager:
             return
 
         log.info(f'Start scraping articles for {len(date_range):,} days ({date_from.strftime("%d.%m.%y")} - '
-                 f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range)} '
+                 f'{date_to.strftime("%d.%m.%y")}). {len(pd.date_range(date_from, date_to)) - len(date_range):,} '
                  f'days already indexed.')
         counter = 0
         with logging_redirect_tqdm(loggers=[log]):
@@ -169,11 +170,13 @@ class NewspaperManager:
                 assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
                     f'Not all pub_dates contain timezone info.'
 
+                # Convert pub_dates to UTC
+                pub_dates = [pub_date.astimezone(dt.timezone.utc) for pub_date in pub_dates]
+                # Remove timezone info from pub_dates
+                pub_dates = [pub_date.replace(tzinfo=None) for pub_date in pub_dates]
+
                 # Remove query strings from urls
                 urls = [url.split('?')[0] for url in urls]
-
-                assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
-                    f'Not all pub_dates are datetime objects.'
 
                 urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
                                      'PubDateIndexPage': pub_dates,
@@ -220,9 +223,8 @@ class NewspaperManager:
 
                     # Notifies if new columns are detected in results
                     for col in results.columns:
-                        if col not in self._db.df_scraped_cols:
-                            self._db.df_scraped_cols.append(col)
-                            # log.info(f'New column detected: {col}')  # todo print can be removed
+                        if col not in self._db.df_scraped_new.columns:
+                            log.info(f'New feature detected: {col}')
 
                     # Add results to articles table
                     self._db.df_scraped_new = pd.concat([self._db.df_scraped_new, results], axis=0)
@@ -330,11 +332,14 @@ class NewspaperManager:
     def _process_article(self, text, url):
         doc = self.spacy_nlp(text)
         data = pd.DataFrame(
-            [[[token.lemma_ for token in doc], [token.is_stop for token in doc], [token.pos_ for token in doc],
-              [token.tag_ for token in doc], [token.dep_ for token in doc], [token.shape_ for token in doc]]],
-            columns=['lemmatized', 'stop_words', 'pos_tags', 'tags', 'deps', 'shapes'],
+            [[np.array([token.__getattribute__(attribute) for token in doc]) for attribute in NLP_ATTRIBUTES]],
+            columns=NLP_ATTRIBUTES,
             index=[url]
         )
+        data['left_edge'] = data['left_edge'].apply(lambda x: np.array([token.i for token in x]))
+        data['right_edge'] = data['right_edge'].apply(lambda x: np.array([token.i for token in x]))
+        data['morph'] = data['morph'].apply(lambda x: np.array([token.to_dict() for token in x]))
+
         return data
 
     def _get_published_articles(self, day):

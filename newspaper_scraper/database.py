@@ -194,7 +194,6 @@ class Database:
 
         if data_name == 'df_indexed':
             _df = self.df_indexed.copy()
-            _df.PubDateIndexPage = _df.PubDateIndexPage.apply(str)
 
         elif data_name == 'df_scraped':
             _df = self.df_scraped_new.copy() if mode == 'append' else self.df_scraped.copy()
