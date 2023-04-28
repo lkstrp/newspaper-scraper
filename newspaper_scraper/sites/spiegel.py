@@ -38,7 +38,7 @@ class DeSpiegel(NewspaperManager):
         # Set locale to German
         locale.setlocale(locale.LC_TIME, "de_DE")
 
-    def _get_published_articles(self, day: dt.date):
+    def _get_articles_by_date(self, day: dt.date):
         """
         Index articles published on a given day and return the urls and publication dates.
 

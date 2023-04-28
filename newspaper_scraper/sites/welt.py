@@ -33,7 +33,7 @@ class DeWelt(NewspaperManager):
     def __init__(self, db_file: str = 'articles.db'):
         super().__init__(db_file)
 
-    def _get_published_articles(self, day: dt.date):
+    def _get_articles_by_date(self, day: dt.date):
         """
         Index articles published on a given day and return the urls and publication dates.
 

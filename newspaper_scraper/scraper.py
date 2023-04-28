@@ -124,7 +124,7 @@ class NewspaperManager:
         return parsed_infos
 
     @retry_on_exception
-    def index_published_articles(self, date_from, date_to, skip_existing=True):
+    def index_articles_by_date_range(self, date_from, date_to, skip_existing=True):
         """
         Indexes all articles published between date_from and date_to for a given newspaper. Indexing means that the
         articles are added to the database and their URLs are stored. The actual scraping of the articles is done
@@ -163,7 +163,7 @@ class NewspaperManager:
             for day in tqdm(date_range):
                 counter += 1
 
-                urls, pub_dates = self._get_published_articles(day)
+                urls, pub_dates = self._get_articles_by_date(day)
 
                 assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
                     f'Not all pub_dates are datetime objects.'
@@ -342,7 +342,13 @@ class NewspaperManager:
 
         return data
 
-    def _get_published_articles(self, day):
+    def _get_articles_by_date(self, day):
+        """
+        Exists only as a placeholder. Needs to be implemented by the child class for each newspaper.
+        """
+        raise NotImplemented
+
+    def _get_articles_by_edition(self, year, edition):
         """
         Exists only as a placeholder. Needs to be implemented by the child class for each newspaper.
         """
