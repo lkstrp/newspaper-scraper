@@ -60,7 +60,7 @@ class DeWelt(NewspaperManager):
         pub_dates = [pd.to_datetime(f'{article.find(string=time_regex)}', format='%d.%m.%Y | %H:%M')
                      for article in articles]
         # Add timezone Europe/Berlin to pub_dates
-        pub_dates = [pub_date.tz_localize('Europe/Berlin') for pub_date in pub_dates]
+        pub_dates = [pub_date.tz_localize('UTC') for pub_date in pub_dates]
 
         assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
 
@@ -111,13 +111,9 @@ class DeWelt(NewspaperManager):
         WebDriverWait(self.selenium_driver, 10).until(
             ec.presence_of_element_located((By.CSS_SELECTOR, 'button[title="Alle akzeptieren"]')))
         self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[title="Alle akzeptieren"]').click()
-        # Wait and reload page because of ads
-        time.sleep(10)
-        self.selenium_driver.get('https://www.welt.de/')
 
         # Login
-        self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[data-component="LoginButton"]').click()
-        self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[data-qa="PageHeader.Login.Button.Login"]').click()
+        self.selenium_driver.get('https://lo.la.welt.de/login')
         WebDriverWait(self.selenium_driver, 10).until(
             ec.presence_of_element_located((By.NAME, 'username')))
         self.selenium_driver.find_element(By.NAME, 'username').send_keys(username)
