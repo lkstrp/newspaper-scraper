@@ -25,7 +25,7 @@ class DeSpiegel(NewspaperManager):
     """
     This class inherits from the NewspaperManager class and implements the newspaper specific methods.
     These methods are:
-        - _get_published_articles: Index articles published on a given day and return the urls and publication dates.
+        - _get_articles_by_date: Index articles published on a given day and return the urls and publication dates.
         - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
             beautifulsoup.
         - _selenium_login: Login to the newspaper website to allow scraping of premium content after the login. Uses
@@ -46,21 +46,23 @@ class DeSpiegel(NewspaperManager):
             day (dt.date): Date of the articles to index.
 
         Returns:
-            urls ([str]): List of urls of the articles published on the given day.
-            pub_dates ([dt.datetime]): List of publication dates of the articles published on the given day.
-              Needs timezone information.
+            [str]: List of urls of the articles published on the given day.
+            [dt.datetime]: List of publication dates of the articles published on the given day. Needs timezone
+                information.
         """
-        URL = f'https://www.spiegel.de/nachrichtenarchiv/artikel-{day.strftime("%d.%m.%Y")}.html'
-        soup = BeautifulSoup(requests.get(URL).content, "html.parser")
-        articles = soup.find("section", {"data-area": "article-teaser-list"}) \
-            .find_all("div", {"data-block-el": "articleTeaser"})
+        url = f'https://www.spiegel.de/nachrichtenarchiv/artikel-{day.strftime("%d.%m.%Y")}.html'
 
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get list of article elements
+        articles = soup \
+            .find("section", {"data-area": "article-teaser-list"}) \
+            .find_all("div", {"data-block-el": "articleTeaser"})
         # Remove advertisement articles
         articles = [article for article in articles if not article.find("h3")]
-
         # Get articles urls
         urls = [article.find('a')['href'] for article in articles]
-
         # Get articles publication dates
         time_regex = re.compile(r'\d{1,2}\.\s\w+,\s\d{1,2}\.\d{2}\sUhr')
         pub_dates = []
@@ -74,8 +76,6 @@ class DeSpiegel(NewspaperManager):
                             f'{article.find(string=time_regex)}.')
                 pub_dates.append(dt.datetime(day.year, day.month, day.day, tzinfo=dt.timezone.utc))
 
-        assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
-
         return urls, pub_dates
 
     def _soup_get_html(self, url: str):
@@ -86,26 +86,21 @@ class DeSpiegel(NewspaperManager):
             url (str): Url of the article to scrape.
 
         Returns:
-            html (str): Html of the article. If the article is premium content, None is returned.
-            is_premium (bool): True if the article is premium content, False otherwise.
+            str: Html of the article. If the article is premium content, None is returned.
+            bool: True if the article is premium content, False otherwise.
         """
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
         try:
-            html = requests.get(url).content
-            soup = BeautifulSoup(html, "html.parser")
             premium_icon = soup.find("header", {"data-area": "intro"}).find('svg', {"id": "spon-spplus-flag-l"})
+            return html, not bool(premium_icon)
         except AttributeError:
-            log.warning(f'Error scraping {url}.')
+            log.warning(f'Could not identify if article is premium: {url}.')
             return None, False
-        return html, not bool(premium_icon)
 
     def _selenium_login(self, username: str, password: str):
         """
-        Using selenium, login to the newspaper website to allow scraping of premium content after the login. Does three
-        things:
-            1. Go to main page and accept cookies.
-            2. Login.
-            3. Check if login was successful.
-
+        Using selenium, login to the newspaper website to allow scraping of premium content after the login.
         Args:
             username (str): Username to login to the newspaper website.
             password (str): Password to login to the newspaper website.
@@ -113,13 +108,6 @@ class DeSpiegel(NewspaperManager):
         Returns:
             bool: True if login was successful, False otherwise.
         """
-        # Go to main page and accept cookies
-        self.selenium_driver.get('https://www.spiegel.de/')
-        privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
-            ec.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
-        self.selenium_driver.switch_to.frame(privacy_frame)
-        self.selenium_driver.find_element(By.XPATH, "//button[contains(text(), 'Akzeptieren und weiter')]").click()
-
         # Login
         self.selenium_driver.get('https://gruppenkonto.spiegel.de/anmelden.html')
         self.selenium_driver.find_element(By.NAME, 'loginform:username').send_keys(username)
@@ -127,10 +115,8 @@ class DeSpiegel(NewspaperManager):
         self.selenium_driver.find_element(By.NAME, 'loginform:password').send_keys(password)
         self.selenium_driver.find_element(By.NAME, 'loginform:submit').click()
 
-        # Go to main page
+        # Go to main page and accept cookies
         self.selenium_driver.get('https://www.spiegel.de/')
-
-        # Accept cookies again, if needed
         privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
             ec.presence_of_element_located((By.XPATH, '//iframe[@title="Privacy Center"]')))
         self.selenium_driver.switch_to.frame(privacy_frame)

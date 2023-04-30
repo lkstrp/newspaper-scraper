@@ -5,6 +5,7 @@ used as a base class for the actual scrapers.
 
 import re
 import datetime as dt
+import requests
 
 import numpy as np
 import pandas as pd
@@ -91,6 +92,19 @@ class NewspaperManager:
         self._db.close()
 
     @staticmethod
+    def _handle_requests(response):
+        if not isinstance(response, requests.Response):
+            raise TypeError(f'Expected requests.Response but got {type(response)}.')
+
+        if response.status_code == 200:
+            return response.text
+        elif response.status_code == 404:
+            return None
+        else:
+            log.warning(f"{response.status_code} error scraping {response.url}.")
+            return None
+
+    @staticmethod
     def _parse_article(html, url):
         """
         Parses the HTML of an article with goose3 and returns a DataFrame with the parsed infos.
@@ -165,6 +179,14 @@ class NewspaperManager:
 
                 urls, pub_dates = self._get_articles_by_date(day)
 
+                # Remove query strings from urls
+                urls = [url.split('?')[0] for url in urls]
+
+                assert len(urls) == len(set(urls)), \
+                    f'Found {len(urls) - len(set(urls))} duplicates in urls. Please remove them in the newspaper' \
+                    f'specific _get_articles_by_date method.'
+                assert len(urls) == len(pub_dates), \
+                    'Number of urls and pub_dates does not match.'
                 assert all([isinstance(pub_date, dt.datetime) for pub_date in pub_dates]), \
                     f'Not all pub_dates are datetime objects.'
                 assert all([pub_date.tzinfo is not None for pub_date in pub_dates]), \
@@ -174,9 +196,6 @@ class NewspaperManager:
                 pub_dates = [pub_date.astimezone(dt.timezone.utc) for pub_date in pub_dates]
                 # Remove timezone info from pub_dates
                 pub_dates = [pub_date.replace(tzinfo=None) for pub_date in pub_dates]
-
-                # Remove query strings from urls
-                urls = [url.split('?')[0] for url in urls]
 
                 urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
                                      'PubDateIndexPage': pub_dates,
@@ -190,13 +209,13 @@ class NewspaperManager:
 
                 # Add new urls to articles table
                 self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
-                log.info(f'{counter}/{len(date_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
+                log.info(f'{counter}/{len(date_range):>3}: Indexed {urls.new.sum()}/{len(urls):>3} articles '
                          f'for {day.strftime("%d.%m.%Y")} (n={len(self._db.df_indexed):,}).')
 
                 self._db.save_data('df_indexed', mode='replace')
 
     @retry_on_exception
-    def index_articles_by_edition(self, edition_from: str, edition_to: str, editions_per_year=55, skip_existing=True):
+    def index_articles_by_editions(self, edition_from: str, edition_to: str, editions_per_year=55, skip_existing=True):
         """
         Index all articles published in between two editions for a given newspaper. Indexing means that the
         articles are added to the database and their URLs are stored. The actual scraping of the articles is done
@@ -261,6 +280,10 @@ class NewspaperManager:
                 # Remove query strings from urls
                 urls = [url.split('?')[0] for url in urls]
 
+                assert len(urls) == len(set(urls)), \
+                    f'Found {len(urls) - len(set(urls))} duplicates in urls. Please remove them in the newspaper' \
+                    f'specific _get_articles_by_edition method.'
+
                 urls = pd.DataFrame({'NewspaperID': self.newspaper_id,
                                      'Edition': f'{year}-{edition}',
                                      'DateIndexed': dt.datetime.now(),
@@ -273,7 +296,7 @@ class NewspaperManager:
 
                 # Add new urls to articles table
                 self._db.df_indexed = pd.concat([self._db.df_indexed, urls[urls['new']].drop('new', axis=1)])
-                log.info(f'{counter}/{len(edition_range)}: Indexed {urls.new.sum()}/{len(urls)} articles '
+                log.info(f'{counter}/{len(edition_range)}: Indexed {urls.new.sum()}/{len(urls):>3} articles '
                          f'for {year}-{edition} (n={len(self._db.df_indexed):,}).')
 
                 self._db.save_data('df_indexed', mode='replace')

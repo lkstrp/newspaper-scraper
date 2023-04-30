@@ -23,7 +23,7 @@ class DeBild(NewspaperManager):
     """
     This class inherits from the NewspaperManager class and implements the newspaper specific methods.
     These methods are:
-        - _get_published_articles: Index articles published on a given day and return the urls and publication dates.
+        - _get_articles_by_date: Index articles published on a given day and return the urls and publication dates.
         - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
             beautifulsoup.
         - _selenium_login: Login to the newspaper website to allow scraping of premium content after the login. Uses
@@ -41,25 +41,25 @@ class DeBild(NewspaperManager):
             day (dt.date): Date of the articles to index.
 
         Returns:
-            urls ([str]): List of urls of the articles published on the given day.
-            pub_dates ([dt.datetime]): List of publication dates of the articles published on the given day.
-              Needs timezone information.
+            [str]: List of urls of the articles published on the given day.
+            [dt.datetime]: List of publication dates of the articles published on the given day. Needs timezone
+                information.
         """
-        URL = f'https://www.bild.de/themen/uebersicht/archiv/archiv-82532020.bild.html?archiveDate=' \
+        url = f'https://www.bild.de/themen/uebersicht/archiv/archiv-82532020.bild.html?archiveDate=' \
               f'{day.strftime("%Y-%m-%d")}'
-        soup = BeautifulSoup(requests.get(URL).content, "html.parser")
+
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get list of article elements
         articles = soup \
             .find("section", {"class": "stage-feed stage-feed--archive"}) \
             .find('ul', {'class': 'stage-feed__viewport'}) \
             .find_all('li')
-
-        # Get articles urls
+        # Get article urls
         urls = ['https://www.bild.de' + article.find('a')['href'] for article in articles]
-
         # Get articles publication dates
         pub_dates = [pd.to_datetime(article.find('time')['datetime']) for article in articles]
-
-        assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
 
         return urls, pub_dates
 
@@ -71,27 +71,17 @@ class DeBild(NewspaperManager):
             url (str): Url of the article to scrape.
 
         Returns:
-            html (str): Html of the article. If the article is premium content, None is returned.
-            is_premium (bool): True if the article is premium content, False otherwise.
+            str: Html of the article. If the article is premium content, None is returned.
+            bool: True if the article is premium content, False otherwise.
         """
-        try:
-            html = requests.get(url).content
-            premium = re.search(r'https://www.bild.de/bild-plus/', url)
-
-        except AttributeError:
-            log.warning(f'Error scraping {url}.')
-            return None, False
+        html = self._handle_requests(requests.get(url))
+        premium = re.search(r'https://www.bild.de/bild-plus/', url)
 
         return html, not bool(premium)
 
     def _selenium_login(self, username: str, password: str):
         """
-        Using selenium, login to the newspaper website to allow scraping of premium content after the login. Does three
-        things:
-            1. Go to main page and accept cookies.
-            2. Login.
-            3. Check if login was successful.
-
+        Using selenium, login to the newspaper website to allow scraping of premium content after the login.
         Args:
             username (str): Username to login to the newspaper website.
             password (str): Password to login to the newspaper website.
@@ -99,7 +89,6 @@ class DeBild(NewspaperManager):
         Returns:
             bool: True if login was successful, False otherwise.
         """
-
         # Go to main page and accept cookies
         self.selenium_driver.get('https://www.bild.de/')
         privacy_frame = WebDriverWait(self.selenium_driver, 10).until(

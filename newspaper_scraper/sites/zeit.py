@@ -21,7 +21,7 @@ class DeZeit(NewspaperManager):
     """
     This class inherits from the NewspaperManager class and implements the newspaper specific methods.
     These methods are:
-        - _get_articles_by_edition: Index articles published in a given edition and return the urls and publication
+        - _get_articles_by_date: Index articles published in a given edition and return the urls and publication
         - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
             beautifulsoup.
         - _selenium_login: Login to the newspaper website to allow scraping of premium content after the login. Uses
@@ -43,19 +43,23 @@ class DeZeit(NewspaperManager):
                 necessarily the same.
 
         Returns:
-            urls ([str]): List of urls of the articles published on the given day.
+        [str]: List of urls of the articles published on the given day.
         """
         # Get week number of day
-        URL = f'https://www.zeit.de/{year}/{edition:02}/index'
+        url = f'https://www.zeit.de/{year}/{edition:02}/index'
 
-        soup = BeautifulSoup(requests.get(URL).content, "html.parser")
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get list of article elements
         articles = soup.find_all("article")
-
         # Get articles urls
         urls = [article.find('a')['href'] for article in articles]
         urls = [url for url in urls if url.startswith('https://www.zeit.de/')]
         # Remove duplicates
+        old_len = len(urls)
         urls = list(set(urls))
+        log.warning(f"Removed {old_len - len(urls)} duplicate urls for {year}/{edition:02}.")
 
         return urls
 
@@ -67,36 +71,27 @@ class DeZeit(NewspaperManager):
             url (str): Url of the article to scrape.
 
         Returns:
-            html (str): Html of the article. If the article is premium content, None is returned.
-            is_premium (bool): True if the article is premium content, False otherwise.
+            str: Html of the article. If the article is premium content, None is returned.
+            bool: True if the article is premium content, False otherwise.
         """
-        response = requests.get(url)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            komplettansicht_link = soup.find("a", href=f"{url}/komplettansicht")
-            # Run again with /komplettansicht if it exists
-            if komplettansicht_link:
-                return self._soup_get_html(f"{url}/komplettansicht")
-            else:
-                try:
-                    premium = soup.find('aside', {'id': 'paywall'})
-                    return response.text, not bool(premium)
-                except AttributeError:
-                    log.warning(f'Error scraping {url}.')
-                    return None, False
-        else:
-            log.warning(f"Error fetching the URL: {response.status_code}")
-            return None, False
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
 
+        # Run again with /komplettansicht if a full page exists
+        komplettansicht_link = soup.find("a", href=f"{url}/komplettansicht")
+        if komplettansicht_link:
+            return self._soup_get_html(f"{url}/komplettansicht")
+
+        try:
+            premium_icon = soup.find('aside', {'id': 'paywall'})
+            return html, not bool(premium_icon)
+        except AttributeError:
+            log.warning(f'Could not identify if article is premium: {url}.')
+            return None, False
 
     def _selenium_login(self, username: str, password: str):
         """
-        Using selenium, login to the newspaper website to allow scraping of premium content after the login. Does three
-        things:
-            1. Login
-            2. Accept cookies
-            3. Check if login was successful
-
+        Using selenium, login to the newspaper website to allow scraping of premium content after the login.
         Args:
             username (str): Username to login to the newspaper website.
             password (str): Password to login to the newspaper website.
@@ -104,7 +99,6 @@ class DeZeit(NewspaperManager):
         Returns:
             bool: True if login was successful, False otherwise.
         """
-
         # Login
         self.selenium_driver.get('https://meine.zeit.de/anmelden')
         self.selenium_driver.find_element(By.XPATH, '//input[@type="email"]').send_keys(username)

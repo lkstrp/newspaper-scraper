@@ -5,7 +5,6 @@ With a similar implementation, it is possible to scrape articles from other news
 """
 import re
 import datetime as dt
-import time
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,7 +22,7 @@ class DeWelt(NewspaperManager):
     """
     This class inherits from the NewspaperManager class and implements the newspaper specific methods.
     These methods are:
-        - _get_published_articles: Index articles published on a given day and return the urls and publication dates.
+        - _get_articles_by_date: Index articles published on a given day and return the urls and publication dates.
         - _soup_get_html: Determine if an article is premium content and scrape the html if it is not. Uses
             beautifulsoup.
         - _selenium_login: Login to the newspaper website to allow scraping of premium content after the login. Uses
@@ -41,28 +40,27 @@ class DeWelt(NewspaperManager):
             day (dt.date): Date of the articles to index.
 
         Returns:
-            urls ([str]): List of urls of the articles published on the given day.
-            pub_dates ([dt.datetime]): List of publication dates of the articles published on the given day.
-              Needs timezone information.
+            [str]: List of urls of the articles published on the given day.
+            [dt.datetime]: List of publication dates of the articles published on the given day. Needs timezone
+                information.
         """
-        URL = f'https://www.welt.de/schlagzeilen/nachrichten-vom-{day.strftime("%-d-%-m-%Y")}.html'
+        url = f'https://www.welt.de/schlagzeilen/nachrichten-vom-{day.strftime("%-d-%-m-%Y")}.html'
 
-        soup = BeautifulSoup(requests.get(URL).content, "html.parser")
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Get list of article elements
         articles = soup \
             .find("div", {"class": "c-tabs__panel-content"}) \
             .find_all("article", {"class": "c-teaser c-teaser--archive"})
-
         # Get articles urls
         urls = ['https://www.welt.de' + article.find('h4').find('a')['href'] for article in articles]
-
         # Get articles publication dates
         time_regex = re.compile(r'\d{2}\.\d{2}\.\d{4}\s\|\s\d{2}:\d{2}')
         pub_dates = [pd.to_datetime(f'{article.find(string=time_regex)}', format='%d.%m.%Y | %H:%M')
                      for article in articles]
         # Add timezone Europe/Berlin to pub_dates
         pub_dates = [pub_date.tz_localize('UTC') for pub_date in pub_dates]
-
-        assert len(urls) == len(pub_dates), 'Number of urls and pub_dates does not match.'
 
         return urls, pub_dates
 
@@ -74,27 +72,22 @@ class DeWelt(NewspaperManager):
             url (str): Url of the article to scrape.
 
         Returns:
-            html (str): Html of the article. If the article is premium content, None is returned.
-            is_premium (bool): True if the article is premium content, False otherwise.
+            str: Html of the article. If the article is premium content, None is returned.
+            bool: True if the article is premium content, False otherwise.
         """
+        html = self._handle_requests(requests.get(url))
+        soup = BeautifulSoup(html, "html.parser")
         try:
-            html = requests.get(url).content
-            soup = BeautifulSoup(html, "html.parser")
-            premium_icon = soup.find("header", {"class": "c-content-container"}).\
+            premium_icon = soup.find("header", {"class": "c-content-container"}). \
                 find('a', {"class": "o-dreifaltigkeit__premium-badge"})
+            return html, not bool(premium_icon)
         except AttributeError:
-            log.warning(f'Error scraping {url}.')
+            log.warning(f'Could not identify if article is premium: {url}.')
             return None, False
-        return html, not bool(premium_icon)
 
     def _selenium_login(self, username: str, password: str):
         """
-        Using selenium, login to the newspaper website to allow scraping of premium content after the login. Does three
-        things:
-            1. Go to main page and accept cookies.
-            2. Login.
-            3. Check if login was successful.
-
+        Using selenium, login to the newspaper website to allow scraping of premium content after the login.
         Args:
             username (str): Username to login to the newspaper website.
             password (str): Password to login to the newspaper website.
@@ -102,6 +95,14 @@ class DeWelt(NewspaperManager):
         Returns:
             bool: True if login was successful, False otherwise.
         """
+        # Login
+        self.selenium_driver.get('https://lo.la.welt.de/login')
+        WebDriverWait(self.selenium_driver, 10).until(
+            ec.presence_of_element_located((By.NAME, 'username')))
+        self.selenium_driver.find_element(By.NAME, 'username').send_keys(username)
+        self.selenium_driver.find_element(By.NAME, 'password').send_keys(password)
+        self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
+
         # Go to main page and accept cookies
         self.selenium_driver.get('https://www.welt.de/')
         privacy_frame = WebDriverWait(self.selenium_driver, 10).until(
@@ -111,14 +112,6 @@ class DeWelt(NewspaperManager):
         WebDriverWait(self.selenium_driver, 10).until(
             ec.presence_of_element_located((By.CSS_SELECTOR, 'button[title="Alle akzeptieren"]')))
         self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[title="Alle akzeptieren"]').click()
-
-        # Login
-        self.selenium_driver.get('https://lo.la.welt.de/login')
-        WebDriverWait(self.selenium_driver, 10).until(
-            ec.presence_of_element_located((By.NAME, 'username')))
-        self.selenium_driver.find_element(By.NAME, 'username').send_keys(username)
-        self.selenium_driver.find_element(By.NAME, 'password').send_keys(password)
-        self.selenium_driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]').click()
 
         # Check if login was successful
         try:
