@@ -1,7 +1,11 @@
 # Newspaper-Scraper  
   
 ##### The all-in-one Python package for seamless newspaper article indexing, scraping, and processing – supports public and premium content!
-  
+
+[<img src="https://img.shields.io/pypi/v/newspaper-scraper.svg">](https://pypi.org/project/newspaper-scraper/)
+[<img src="https://img.shields.io/pypi/l/newspaper-scraper.svg">](https://pypi.org/project/newspaper-scraper/)
+<img src="https://static.pepy.tech/badge/newspaper-scraper">
+
 ## Intro  
 While tools like [newspaper3k](https://newspaper.readthedocs.io/en/latest/) and [goose3](https://github.com/goose3/goose3) can be used for extracting articles from news websites, they need a dedicated article url for older articles and do not support paywall content. This package aims to solve these issues by providing a unified interface for indexing, extracting and processing articles from newspapers.  
 1. Indexing: Index articles from a newspaper website using the [beautifulsoup](https://beautiful-soup-4.readthedocs.io/en/latest/) package for public articles and [selenium](https://selenium-python.readthedocs.io/) for paywall content.  
