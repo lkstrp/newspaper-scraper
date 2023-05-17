@@ -45,7 +45,9 @@ class DeHandelsblatt(NewspaperManager):
         """
         url = f'https://www.handelsblatt.com/archiv/{day.strftime("%Y/%-m/%-d")}'
 
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if html is None:
+            return []
         soup = BeautifulSoup(html, "html.parser")
 
         # Get list of article elements
@@ -59,12 +61,19 @@ class DeHandelsblatt(NewspaperManager):
             page_urls = ['https://www.handelsblatt.com' + page_url['href'] for page_url in page_urls]
 
             for page_url in page_urls:
-                html = self._handle_requests(requests.get(page_url))
+                html = self._request(page_url)
                 soup = BeautifulSoup(html, "html.parser")
                 # Get list of article elements
                 articles = soup.find_all("a", {"class": "vhb-teaser-link"})
                 # Add article urls to list
                 [urls.append('https://www.handelsblatt.com' + article['href']) for article in articles]
+
+        # Remove duplicates
+        old_len = len(urls)
+        urls = list(set(urls))
+        if len(urls) < old_len:
+            log.warning(f"Removed {old_len - len(urls)} duplicate urls for {day.strftime('%Y-%m-%d')}.")
+
         # Create list of publication dates, since the website does not provide them
         pub_dates = [dt.datetime.combine(day, dt.datetime.min.time(), tzinfo=dt.timezone.utc)] * len(urls)
 

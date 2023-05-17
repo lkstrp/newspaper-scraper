@@ -49,7 +49,7 @@ class DeTagesspiegel(NewspaperManager):
         page = 0
         while True:
             page += 1
-            html = self._handle_requests(requests.get(url + (f'{page}' if page > 1 else '')))
+            html = self._request(url + (f'{page}' if page > 1 else ''))
             if not html:
                 break
             soup = BeautifulSoup(html, "html.parser")
@@ -80,7 +80,7 @@ class DeTagesspiegel(NewspaperManager):
             str: Html of the article. If the article is premium content, None is returned.
             bool: True if the article is premium content, False otherwise.
         """
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
         soup = BeautifulSoup(html, "html.parser")
         try:
             premium_icon = soup.find('div', {'class': 'Uk'}).find('svg')

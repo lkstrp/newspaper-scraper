@@ -7,7 +7,6 @@ import re
 import datetime as dt
 import time
 
-import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from selenium.webdriver.common.by import By
@@ -48,7 +47,9 @@ class DeBild(NewspaperManager):
         url = f'https://www.bild.de/themen/uebersicht/archiv/archiv-82532020.bild.html?archiveDate=' \
               f'{day.strftime("%Y-%m-%d")}'
 
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if html is None:
+            return []
         soup = BeautifulSoup(html, "html.parser")
 
         # Get list of article elements
@@ -74,7 +75,9 @@ class DeBild(NewspaperManager):
             str: Html of the article. If the article is premium content, None is returned.
             bool: True if the article is premium content, False otherwise.
         """
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if html is None:
+            return None, False
         premium = re.search(r'https://www.bild.de/bild-plus/', url)
 
         return html, not bool(premium)

@@ -25,6 +25,7 @@ from .utils.utils import flatten_dict
 from .utils.utils import get_selenium_webdriver
 from .utils.utils import retry_on_exception
 from .database import Database
+from selenium.common.exceptions import WebDriverException
 
 
 class NewspaperManager:
@@ -92,12 +93,21 @@ class NewspaperManager:
         self._db.close()
 
     @staticmethod
-    def _handle_requests(response):
-        if not isinstance(response, requests.Response):
-            raise TypeError(f'Expected requests.Response but got {type(response)}.')
+    def _request(url, get_full_response=False):
 
+        # Get the HTML of the article
+        try:
+            response = requests.get(url)
+        except requests.exceptions.ConnectionError:
+            log.warning(f'Connection error while requesting {url}.')
+            return None
+
+        # Check if the response is valid
         if response.status_code == 200:
-            return response.text
+            if get_full_response:
+                return response
+            else:
+                return response.text
         elif response.status_code == 404:
             return None
         else:
@@ -116,6 +126,8 @@ class NewspaperManager:
         Returns:
             pd.DataFrame: A DataFrame with the parsed infos.
         """
+        if not html:
+            return pd.DataFrame()
         g = Goose()
         article = g.extract(raw_html=html)
 
@@ -473,8 +485,15 @@ class NewspaperManager:
         Function to get the html of a private article. Uses selenium to get the html. Can be optionally overwritten by
         the child if a different method is needed.
         """
-        self.selenium_driver.get(url)
-        return self.selenium_driver.page_source
+        try:
+            self.selenium_driver.get(url)
+            return self.selenium_driver.page_source
+        except WebDriverException as e:
+            if "ERR_NAME_NOT_RESOLVED" in str(e):
+                print(f"URL is not valid: {url}")
+                return None
+            else:
+                raise e
 
     def _selenium_login(self, username: str, password: str):
         """

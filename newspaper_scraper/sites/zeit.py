@@ -48,7 +48,9 @@ class DeZeit(NewspaperManager):
         # Get week number of day
         url = f'https://www.zeit.de/{year}/{edition:02}/index'
 
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if html is None:
+            return []
         soup = BeautifulSoup(html, "html.parser")
 
         # Get list of article elements
@@ -56,6 +58,7 @@ class DeZeit(NewspaperManager):
         # Get articles urls
         urls = [article.find('a')['href'] for article in articles]
         urls = [url for url in urls if url.startswith('https://www.zeit.de/')]
+
         # Remove duplicates
         old_len = len(urls)
         urls = list(set(urls))
@@ -74,7 +77,7 @@ class DeZeit(NewspaperManager):
             str: Html of the article. If the article is premium content, None is returned.
             bool: True if the article is premium content, False otherwise.
         """
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
         soup = BeautifulSoup(html, "html.parser")
 
         # Run again with /komplettansicht if a full page exists
@@ -113,7 +116,7 @@ class DeZeit(NewspaperManager):
             ec.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'AKZEPTIEREN UND WEITER')]")))
         cookie_accept_button.click()
 
-        # Check if loggin was successful
+        # Check if login was successful
         try:
             WebDriverWait(self.selenium_driver, 10).until(
                 ec.presence_of_element_located((By.XPATH, '//span[@class="dashboard__title"]')))

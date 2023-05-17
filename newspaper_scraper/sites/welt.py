@@ -46,7 +46,9 @@ class DeWelt(NewspaperManager):
         """
         url = f'https://www.welt.de/schlagzeilen/nachrichten-vom-{day.strftime("%-d-%-m-%Y")}.html'
 
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if html is None:
+            return []
         soup = BeautifulSoup(html, "html.parser")
 
         # Get list of article elements
@@ -75,7 +77,9 @@ class DeWelt(NewspaperManager):
             str: Html of the article. If the article is premium content, None is returned.
             bool: True if the article is premium content, False otherwise.
         """
-        html = self._handle_requests(requests.get(url))
+        html = self._request(url)
+        if not html:
+            return None, False
         soup = BeautifulSoup(html, "html.parser")
         try:
             premium_icon = soup.find("header", {"class": "c-content-container"}). \
