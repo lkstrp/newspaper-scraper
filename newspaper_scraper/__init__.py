@@ -9,6 +9,7 @@ from .sites.welt import DeWelt
 from .sites.zeit import DeZeit
 from .sites.handelsblatt import DeHandelsblatt
 from .sites.tagesspiegel import DeTagesspiegel
+from .sites.sueddeutsche import DeSueddeutsche
 
 # Version of the newspaper_scraper package
 __version__ = "0.2.0"
@@ -19,3 +20,4 @@ Welt = DeWelt
 Zeit = DeZeit
 Handelsblatt = DeHandelsblatt
 Tagesspiegel = DeTagesspiegel
+Sueddeutsche = DeSueddeutsche

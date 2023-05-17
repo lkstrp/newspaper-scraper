@@ -150,7 +150,7 @@ class NewspaperManager:
         return parsed_infos
 
     @retry_on_exception
-    def index_articles_by_date_range(self, date_from, date_to, skip_existing=True):
+    def index_articles_by_date_range(self, date_from, date_to, freq='D', skip_existing=True):
         """
         Indexes all articles published between date_from and date_to for a given newspaper. Indexing means that the
         articles are added to the database and their URLs are stored. The actual scraping of the articles is done
@@ -159,6 +159,7 @@ class NewspaperManager:
         Args:
             date_from (dt.datetime or str): The first day to scrape articles from.
             date_to (dt.datetime or str): The last day to scrape articles from.
+            freq (str, optional): The frequency of the date range. Defaults to 'D'.
             skip_existing (bool, optional): If True, days that are already indexed are skipped. Defaults to True.
         """
         date_from = pd.to_datetime(date_from)
@@ -169,7 +170,7 @@ class NewspaperManager:
         # Convert already_indexed.PubDateIndexPage to set of dates for faster lookup
         indexed_dates = {index_day.date() for index_day in already_indexed.PubDateIndexPage}
         # Create pd.date_range and convert it to a numpy array of dates for faster lookup
-        date_range = pd.date_range(date_from, date_to)
+        date_range = pd.date_range(date_from, date_to, freq=freq)
         date_range_dates = np.array([day.date() for day in date_range])
 
         if skip_existing:

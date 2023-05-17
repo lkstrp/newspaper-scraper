@@ -11,13 +11,15 @@ While tools like [newspaper3k](https://newspaper.readthedocs.io/en/latest/) and 
 The indexing functionality is based on a dedicated file for each newspaper. A few newspapers are already supported, but it is easy to add new ones.  
   
 ### Supported Newspapers  
-| Logo | Newspaper | Country | Time span | Number of articles |  
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ------- | --------- | --------------- |  
-| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/Der_Spiegel_2022_logo.svg/640px-Der_Spiegel_2022_logo.svg.png" height="70"> | [Der Spiegel](https://www.spiegel.de/) | Germany | Since 2000 | tbd |  
-| <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Die_Welt_Logo_2015.png" height="70"> | [Die Welt](https://www.welt.de/) | Germany | Since 2000 | tbd  
-| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Logo_BILD.svg/1920px-Logo_BILD.svg.png" height="70"> | [Bild](https://www.bild.de/) | Germany | Since 2006 | tbd |  
-| <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Die_Zeit-Logo-Bremen.svg" height="70"> | [Die Zeit](https://www.zeit.de/) | Germany | Since 1946 | tbd |   
-| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/ff/Handelsblatt_201x_logo.svg/2880px-Handelsblatt_201x_logo.svg.png" height="70"> | [Handelsblatt](https://www.handelsblatt.com/) | Germany | Since 2003 | tbd |  
+| Logo | Newspaper                                        | Country | Time span  | Number of articles |  
+| ----------------------------------------------------------------------------------------------------------------------------------------------- |--------------------------------------------------| ------- |------------| --------------- |  
+| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/48/Der_Spiegel_2022_logo.svg/640px-Der_Spiegel_2022_logo.svg.png" height="70"> | [Der Spiegel](https://www.spiegel.de/)           | Germany | Since 2000 | tbd |  
+| <img src="https://upload.wikimedia.org/wikipedia/commons/0/0a/Die_Welt_Logo_2015.png" height="70"> | [Die Welt](https://www.welt.de/)                 | Germany | Since 2000 | tbd  
+| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Logo_BILD.svg/1920px-Logo_BILD.svg.png" height="70"> | [Bild](https://www.bild.de/)                     | Germany | Since 2006 | tbd |  
+| <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Die_Zeit-Logo-Bremen.svg" height="70"> | [Die Zeit](https://www.zeit.de/)                 | Germany | Since 1946 | tbd |   
+| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/ff/Handelsblatt_201x_logo.svg/2880px-Handelsblatt_201x_logo.svg.png" height="70"> | [Handelsblatt](https://www.handelsblatt.com/)    | Germany | Since 2003 | tbd | 
+| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Tagesspiegel_%282022-11-29%29.svg/2880px-Tagesspiegel_%282022-11-29%29.svg.png" height="70"> | [Der Tagesspiegel](https://www.tagesspiegel.de/) | Germany | Since 2000 | tbd |
+| <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/S%C3%BCddeutsche_Zeitung_Logo.svg/2880px-S%C3%BCddeutsche_Zeitung_Logo.svg.png" height="70"> | [Süddeutsche Zeitung](https://www.sueddeutsche.de/)    | Germany | Since 2001 | tbd |
 
 ## Setup  
 It is recommended to install the package in an dedicated Python environment.  
@@ -37,14 +39,14 @@ pip install newspaper-scraper[nlp]
 To index, extract and process all public and premium articles from [Der Spiegel](https://www.spiegel.de/), published in August 2021, run the following code:  
   
 ```python  
-import newspaper_scraper as ns  
+import newspaper_scraper as nps  
 from credentials import username, password  
   
-with ns.Spiegel(db_file='articles.db') as news:
-news.index_articles_by_date_range('2021-08-01', '2021-08-31')  
-news.scrape_public_articles()
-news.scrape_premium_articles(username=username, password=password)  
-news.nlp()
+with nps.Spiegel(db_file='articles.db') as news:
+    news.index_articles_by_date_range('2021-08-01', '2021-08-31')  
+    news.scrape_public_articles()
+    news.scrape_premium_articles(username=username, password=password)  
+    news.nlp()
 ```  
   
 This will create a sqlite database file called `articles.db` in the current working directory. The database contains the following tables:  
