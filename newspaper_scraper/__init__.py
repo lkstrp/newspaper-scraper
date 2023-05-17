@@ -12,7 +12,7 @@ from .sites.tagesspiegel import DeTagesspiegel
 from .sites.sueddeutsche import DeSueddeutsche
 
 # Version of the newspaper_scraper package
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 Spiegel = DeSpiegel
 Bild = DeBild
